@@ -3,15 +3,34 @@
 
 export const DIAS_JS = { 'Domingo': 0, 'Segunda': 1, 'Terça': 2, 'Quarta': 3, 'Quinta': 4, 'Sexta': 5, 'Sábado': 6 }
 
+// Data no fuso do aparelho (YYYY-MM-DD). toISOString() usa UTC e, à noite no
+// Brasil (depois das 21h), já devolve o dia seguinte — errando a data da aula.
+export function localIso(d = new Date()) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  return localIso()
+}
+
+// Janela de edição da lista de presença: hoje + 2 dias para trás.
+// Admin não passa por essa regra (quem chama decide).
+export const JANELA_PRESENCA_DIAS = 2
+
+export function dentroDaJanelaPresenca(dataIso, hojeIso = todayIso()) {
+  if (!dataIso) return false
+  const diff = Math.round((new Date(hojeIso + 'T12:00:00') - new Date(dataIso + 'T12:00:00')) / 86400000)
+  return diff >= 0 && diff <= JANELA_PRESENCA_DIAS
 }
 
 export function mondayOfThisWeekIso() {
   const d = new Date()
   const diff = (d.getDay() + 6) % 7 // 0 = segunda-feira
   d.setDate(d.getDate() - diff)
-  return d.toISOString().slice(0, 10)
+  return localIso(d)
 }
 
 export function isoRange(startIso, endIso) {

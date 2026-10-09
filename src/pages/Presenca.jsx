@@ -14,18 +14,17 @@ import {
   Check, X, Save, Users, Clock, StopCircle, AlertCircle, PlayCircle, AlertTriangle, CheckCircle2,
   ChevronDown, ChevronUp, ClipboardList, Radar as RadarIcon,
 } from 'lucide-react'
-import { fmtDiaCurto } from '../lib/semana'
+import { fmtDiaCurto, localIso, dentroDaJanelaPresenca, JANELA_PRESENCA_DIAS } from '../lib/semana'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-function todayIso() { return new Date().toISOString().slice(0, 10) }
-function date7daysAgoIso() {
-  const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10)
+function todayIso() { return localIso() }
+function dateDaysAgoIso(n) {
+  const d = new Date(); d.setDate(d.getDate() - n); return localIso(d)
 }
+function date7daysAgoIso() { return dateDaysAgoIso(6) }
 function buildDateRange() {
   const days = []
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i); days.push(d.toISOString().slice(0, 10))
-  }
+  for (let i = 6; i >= 0; i--) days.push(dateDaysAgoIso(i))
   return days
 }
 function fmtTime(isoTs) {
@@ -94,12 +93,13 @@ export default function Presenca() {
   const [savingJust,     setSavingJust]     = useState(false)
 
   // ── derivados ────────────────────────────────────────────────────────────────
+  // Janela de 2 dias (hoje, ontem e anteontem) — vale mesmo com a chamada já
+  // encerrada, pra o professor poder corrigir ou fazer a chamada atrasada.
+  // Admin é incondicional.
   function isEditavel() {
     if (!dataSel) return false
     if (isAdmin) return true
-    if (chamada?.encerrada_em) return false
-    const diff = Math.round((new Date(hoje) - new Date(dataSel)) / 86400000)
-    return diff >= 0 && diff <= 2
+    return dentroDaJanelaPresenca(dataSel, hoje)
   }
   const editavel       = isEditavel()
   const chamadaAberta  = chamada && !chamada.encerrada_em
@@ -724,12 +724,14 @@ export default function Presenca() {
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <input type="date" value={dataSel}
+                  max={isAdmin ? undefined : hoje}
+                  min={isAdmin ? undefined : dateDaysAgoIso(JANELA_PRESENCA_DIAS)}
                   onChange={e => { setDataSel(e.target.value); setSaveMsg(null) }}
                   className={sCls}/>
                 {!chamadaLoading && chamadaAberta && (
                   <>
                     <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                      <PlayCircle size={11}/> {fmtTime(chamada.iniciada_em)}
+                      <PlayCircle size={11}/> Chamada às {fmtTime(chamada.iniciada_em)}
                       {chamada.frequencia_pct != null && ` · ${chamada.frequencia_pct}%`}
                     </span>
                     <button onClick={encerrarChamada} disabled={encerrando}
@@ -749,12 +751,9 @@ export default function Presenca() {
             </div>
 
             {/* Banners */}
-            {chamadaEncerrada && !isAdmin && (
-              <div className="px-4 py-2 bg-slate-50 dark:bg-navy-900/40 border-b border-slate-100 text-xs text-slate-500 flex items-center gap-2">🔒 Chamada encerrada — somente leitura</div>
-            )}
-            {!chamadaEncerrada && !editavel && dataSel < hoje && (
+            {!editavel && dataSel < hoje && (
               <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 text-xs text-amber-700 flex items-center gap-2">
-                <Clock size={12}/> Janela de edição encerrada para esta data
+                <Clock size={12}/> Janela de edição encerrada para esta data — a lista fica liberada por {JANELA_PRESENCA_DIAS} dias. Fale com um administrador para alterar.
               </div>
             )}
             {!chamada && !chamadaLoading && editavel && alunos.length > 0 && (
@@ -799,7 +798,7 @@ export default function Presenca() {
               <div className="p-8 text-center text-sm text-slate-400">Carregando alunos…</div>
             ) : alunos.length === 0 ? (
               <div className="p-8"><EmptyState icon={<Users size={32} className="text-slate-300"/>} title="Nenhum aluno nesta turma" description="Adicione alunos para registrar a presença." /></div>
-            ) : (chamadaEncerrada && !isAdmin) || (!editavel && dataSel < hoje && alunos.some(a => a.id in presencaState)) ? (
+            ) : (!editavel && dataSel < hoje && alunos.some(a => a.id in presencaState)) ? (
               <ul className="divide-y divide-slate-100 dark:divide-navy-700">
                 {alunos.map(a => {
                   const st = presencaState[a.id]; const mot = motivoState[a.id]
@@ -887,7 +886,7 @@ export default function Presenca() {
                 {saveMsg
                   ? <span className={`text-xs font-medium flex items-center gap-1.5 ${saveMsg.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>{saveMsg.type === 'error' && <AlertCircle size={13}/>}{saveMsg.text}</span>
                   : <span/>}
-                <Button variant="primary" size="sm" onClick={handleSave} disabled={saving || !editavel || (chamadaEncerrada && !isAdmin)}>
+                <Button variant="primary" size="sm" onClick={handleSave} disabled={saving || !editavel}>
                   <Save size={13}/>{saving ? 'Salvando…' : 'Salvar Presença'}
                 </Button>
               </div>

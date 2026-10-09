@@ -1,5 +1,6 @@
 // src/pages/PoloDetalhe.jsx
 import { logAcao } from '../lib/auditLog'
+import { localIso, dentroDaJanelaPresenca } from '../lib/semana'
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
@@ -113,17 +114,23 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
   const [carregandoChamada, setCarregandoChamada] = useState(false)
   const [iniciando, setIniciando] = useState(false)
 
-  const dataHoje = new Date().toISOString().split('T')[0]
+  const dataHoje = localIso()
+  // Data da aula que está sendo preenchida. Professor: hoje ou até 2 dias atrás
+  // (ontem/anteontem) pra editar ou fazer a chamada atrasada. Admin: qualquer data.
+  const [dataAula, setDataAula] = useState(dataHoje)
+  const ehHoje = dataAula === dataHoje
+  const opcoesData = [0, 1, 2].map(n => { const d = new Date(); d.setDate(d.getDate() - n); return localIso(d) })
+  useEffect(() => { if (open) setDataAula(localIso()) }, [open, turma?.id])
 
   // Janela de presença:
-  // - Disponível a partir de 10min antes do início até qualquer hora do mesmo dia
-  // - Nunca bloqueia no meio do dia (isLocked desativado)
+  // - Hoje: disponível a partir de 10min antes do início até meia-noite
+  // - Dias anteriores (até 2): sempre liberado; admin: qualquer data
   // - adminMode ignora a trava de "ainda não disponível"
   const [h, m] = (turma?.horario || '00:00').split(':').map(Number)
   const startMins = h * 60 + m
   const duracaoMin = turma?.duracao_min || 60
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
-  const notYetAvailable = adminMode ? false : nowMins < startMins - 10
+  const notYetAvailable = (adminMode || !ehHoje) ? false : nowMins < startMins - 10
   const isLocked = false  // nunca bloqueia no mesmo dia — professor pode registrar até meia-noite
 
   const alunosTurma = useMemo(() => {
@@ -158,39 +165,47 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
     if (!turma || !open) { setChamada(null); return }
     setCarregandoChamada(true)
     supabase.from('chamadas').select('*')
-      .eq('turma_id', turma.id).eq('data', dataHoje).maybeSingle()
+      .eq('turma_id', turma.id).eq('data', dataAula).maybeSingle()
       .then(({ data }) => { setChamada(data ?? null); setCarregandoChamada(false) })
-  }, [turma?.id, open])
+  }, [turma?.id, open, dataAula])
 
   useEffect(() => {
     if (!turma || !open) return
-    // Init presença (use existing if any; senão, aluno com justificativa de
-    // período cadastrada pra hoje já nasce "Justificada"; senão, falta)
-    const existentes = presencas.filter(p => p.turma_id === turma.id && p.data === dataHoje)
-    const map = {}, motivos = {}
-    alunosTurma.forEach(a => {
-      const ex = existentes.find(p => p.aluno_id === a.id)
-      if (ex) { map[a.id] = ex.status; if (ex.motivo) motivos[a.id] = ex.motivo; return }
-      const justif = justificativas.find(j => j.aluno_id === a.id && j.data_inicio <= dataHoje && j.data_fim >= dataHoje)
-      if (justif) { map[a.id] = 'justificado'; motivos[a.id] = `📅 Ausência avisada: ${justif.motivo}` }
-      else map[a.id] = false
-    })
-    setPresencaMap(map)
-    setMotivoMap(motivos)
+    let cancelled = false
+    ;(async () => {
+      // Init presença: lê o que está salvo AGORA no banco (não a cópia da tela, que
+      // pode estar desatualizada); senão, aluno com justificativa de período
+      // cadastrada pra data já nasce "Justificada"; senão, falta.
+      const { data: fresh } = await supabase.from('presencas')
+        .select('aluno_id,status,motivo').eq('turma_id', turma.id).eq('data', dataAula)
+      if (cancelled) return
+      const existentes = fresh ?? presencas.filter(p => p.turma_id === turma.id && p.data === dataAula)
+      const map = {}, motivos = {}
+      alunosTurma.forEach(a => {
+        const ex = existentes.find(p => p.aluno_id === a.id)
+        if (ex) { map[a.id] = ex.status; if (ex.motivo) motivos[a.id] = ex.motivo; return }
+        const justif = justificativas.find(j => j.aluno_id === a.id && j.data_inicio <= dataAula && j.data_fim >= dataAula)
+        if (justif) { map[a.id] = 'justificado'; motivos[a.id] = `📅 Ausência avisada: ${justif.motivo}` }
+        else map[a.id] = false
+      })
+      setPresencaMap(map)
+      setMotivoMap(motivos)
 
-    // Init registro
-    const reg = registros.find(r => r.turma_id === turma.id && r.data === dataHoje)
-    setRegistro({ conteudo: reg?.conteudo ?? '', ocorrencias: reg?.ocorrencias ?? '' })
-    setFotos(reg?.fotos ?? [])
-    setSaved(false)
-  }, [turma, open])
+      // Init registro
+      const reg = registros.find(r => r.turma_id === turma.id && r.data === dataAula)
+      setRegistro({ conteudo: reg?.conteudo ?? '', ocorrencias: reg?.ocorrencias ?? '' })
+      setFotos(reg?.fotos ?? [])
+      setSaved(false)
+    })()
+    return () => { cancelled = true }
+  }, [turma, open, dataAula])
 
   // Inicia a aula — cria registro na tabela chamadas
   async function iniciarAula() {
     if (!turma || !profile) return
     setIniciando(true)
     const { data, error } = await supabase.from('chamadas')
-      .insert({ turma_id: turma.id, data: dataHoje, iniciada_por: profile.id })
+      .insert({ turma_id: turma.id, data: dataAula, iniciada_por: profile.id })
       .select('*').single()
     if (!error && data) {
       setChamada(data)
@@ -205,7 +220,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
       // busca essa chamada. Se não vier nada, é sinal de que a regra de
       // segurança bloqueou a leitura: sem vínculo nessa turma/polo.
       const { data: ex } = await supabase.from('chamadas').select('*')
-        .eq('turma_id', turma.id).eq('data', dataHoje).maybeSingle()
+        .eq('turma_id', turma.id).eq('data', dataAula).maybeSingle()
       if (ex) setChamada(ex)
       else showAulaToast('⚠️ Você não tem permissão pra iniciar essa turma — seu cadastro não está vinculado a ela. Fale com o admin.', 'error')
     } else if (error) {
@@ -226,7 +241,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
     const status = novoValor === 'presente' || novoValor === true ? 'presente'
                   : novoValor === 'justificado' ? 'justificado' : 'falta'
     const { error } = await supabase.from('presencas').upsert({
-      turma_id: turma.id, aluno_id: alunoId, data: dataHoje, status,
+      turma_id: turma.id, aluno_id: alunoId, data: dataAula, status,
       motivo: status === 'justificado' ? (motivo ?? motivoMap[alunoId] ?? null) : null,
       registrado_por: profile?.id ?? null,
     }, { onConflict: 'turma_id,aluno_id,data' })
@@ -239,21 +254,21 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
     if (novoValor === false) {
       setPresencaMap(m => { const n = { ...m }; alunosAlvo.forEach(a => { n[a.id] = false }); return n })
       const { error } = await supabase.from('presencas').delete()
-        .eq('turma_id', turma.id).eq('data', dataHoje).in('aluno_id', alunosAlvo.map(a => a.id))
+        .eq('turma_id', turma.id).eq('data', dataAula).in('aluno_id', alunosAlvo.map(a => a.id))
       if (error) showAulaToast('⚠️ Não deu pra limpar a lista — confira sua internet e tente de novo.', 'error')
       return
     }
     setPresencaMap(m => { const n = { ...m }; alunosAlvo.forEach(a => { n[a.id] = novoValor }); return n })
     const { error } = await supabase.from('presencas')
       .upsert(alunosAlvo.map(a => ({
-        turma_id: turma.id, aluno_id: a.id, data: dataHoje, status: 'presente',
+        turma_id: turma.id, aluno_id: a.id, data: dataAula, status: 'presente',
         motivo: null, registrado_por: profile?.id ?? null,
       })), { onConflict: 'turma_id,aluno_id,data' })
     if (error) showAulaToast('⚠️ Não deu pra salvar a lista inteira — confira sua internet e tente de novo.', 'error')
   }
 
   function abrirJustificar(aluno) {
-    setJustForm({ data_inicio: dataHoje, data_fim: dataHoje, motivo: '' })
+    setJustForm({ data_inicio: dataAula, data_fim: dataAula, motivo: '' })
     setJustModalAluno(aluno)
   }
 
@@ -270,7 +285,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
     setSavingJust(false)
     if (error) { showAulaToast('⚠️ Não foi possível salvar a justificativa. Tente de novo.', 'error'); return }
     // Se hoje cai dentro do período justificado, já reflete na chamada aberta.
-    if (justForm.data_inicio <= dataHoje && justForm.data_fim >= dataHoje) {
+    if (justForm.data_inicio <= dataAula && justForm.data_fim >= dataAula) {
       await marcarPresenca(justModalAluno.id, 'justificado', `📅 Ausência avisada: ${justForm.motivo.trim()}`)
     }
     setJustModalAluno(null)
@@ -283,14 +298,17 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
       .from('presencas')
       .select('id,aluno_id')
       .eq('turma_id', turma.id)
-      .eq('data', dataHoje)
+      .eq('data', dataAula)
     const latestIds = {}
     ;(existentes ?? []).forEach(r => { latestIds[r.aluno_id] = r.id })
 
     // Converte o valor do map (string|boolean) para o status correto
     const toStatus = (val) => {
-      if (val === 'presente' || val === 'justificado') return val
-      return val ? 'presente' : 'falta'
+      // Atenção: 'falta' (texto vindo do banco) é "truthy" — nunca usar "val ? ..."
+      // aqui, senão toda falta já salva vira presença ao registrar de novo.
+      if (val === 'justificado') return 'justificado'
+      if (val === 'presente' || val === true) return 'presente'
+      return 'falta'
     }
     const toUpdate = [], toInsert = []
     Object.entries(presencaMap).forEach(([aluno_id, val]) => {
@@ -298,7 +316,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
       if (latestIds[aluno_id]) {
         toUpdate.push({ id: latestIds[aluno_id], status })
       } else {
-        toInsert.push({ turma_id: turma.id, aluno_id, data: dataHoje, status })
+        toInsert.push({ turma_id: turma.id, aluno_id, data: dataAula, status, registrado_por: profile?.id ?? null })
       }
     })
     const results = await Promise.all([
@@ -310,10 +328,10 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
   }
 
   async function salvarRegistro() {
-    const presentesCount = Object.values(presencaMap).filter(Boolean).length
+    const presentesCount = Object.values(presencaMap).filter(v => v === 'presente' || v === true || v === 'justificado').length
     const { error } = await supabase.from('registros_aula').upsert({
       turma_id: turma.id,
-      data: dataHoje,
+      data: dataAula,
       conteudo: registro.conteudo,
       ocorrencias: registro.ocorrencias,
       alunos_presentes: presentesCount,
@@ -325,6 +343,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
 
   async function salvarAula() {
     if (isLocked || notYetAvailable) return
+    if (!adminMode && !dentroDaJanelaPresenca(dataAula, dataHoje)) return
     setSaving(true)
     setSaveMsg(null)
     try {
@@ -351,7 +370,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
         acao: 'registro_presenca',
         perfil: profile,
         turma,
-        detalhes: `${totalPresentes}P ${totalJustif > 0 ? totalJustif + 'J ' : ''}/ ${totalAtivos} — ${freq}% · ${dataHoje} · ${agora}`,
+        detalhes: `${totalPresentes}P ${totalJustif > 0 ? totalJustif + 'J ' : ''}/ ${totalAtivos} — ${freq}% · ${dataAula} · ${agora}`,
       })
 
       setSaving(false)
@@ -380,7 +399,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
         acao: 'registro_presenca',
         perfil: profile,
         turma,
-        detalhes: `ERRO · ${dataHoje} · ${erro?.code ?? ''} · ${erro?.message?.slice(0, 100) ?? 'desconhecido'}`,
+        detalhes: `ERRO · ${dataAula} · ${erro?.code ?? ''} · ${erro?.message?.slice(0, 100) ?? 'desconhecido'}`,
       })
     }
   }
@@ -500,6 +519,22 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
             <div className="flex-1 h-px bg-slate-200 dark:bg-navy-600" />
           </div>
 
+          {/* ── Data da aula: hoje ou até 2 dias atrás (admin: qualquer data) ── */}
+          <div className="mb-3 flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Data da aula:</span>
+            {adminMode ? (
+              <input type="date" value={dataAula} max={dataHoje}
+                onChange={e => e.target.value && setDataAula(e.target.value)}
+                className="text-xs border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 text-navy-900 dark:text-white rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+            ) : opcoesData.map((d, i) => (
+              <button key={d} onClick={() => setDataAula(d)}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${dataAula === d ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 dark:border-navy-600 text-slate-500 hover:bg-slate-50 dark:hover:bg-navy-700'}`}>
+                {['Hoje', 'Ontem', 'Anteontem'][i]} · {format(new Date(d + 'T12:00:00'), 'dd/MM')}
+              </button>
+            ))}
+            {!adminMode && <span className="text-[10px] text-slate-400">Você pode editar ou fazer a chamada em até 2 dias.</span>}
+          </div>
+
           {/* ── Estado: carregando chamada ── */}
           {carregandoChamada ? (
             <div className="py-4 text-center text-xs text-slate-400">Verificando chamada…</div>
@@ -509,14 +544,15 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
             <div className="flex flex-col items-center gap-3 py-6 bg-slate-50 dark:bg-navy-900/30 rounded-xl border border-slate-200 dark:border-navy-700">
               <div className="text-3xl">▶️</div>
               <div className="text-center">
-                <p className="text-sm font-bold text-navy-900 dark:text-white">Iniciar Aula</p>
+                <p className="text-sm font-bold text-navy-900 dark:text-white">Abrir lista de presença</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs">
-                  Clique em <strong>Iniciar Aula</strong> para liberar a lista de presença.<br/>
-                  Se não houver aula hoje, não inicie — os alunos não ficam com falta.
+                  Clique em <strong>Abrir lista de presença</strong> para fazer a chamada.<br/>
+                  O horário da aula continua sendo o da turma ({turma.horario?.slice(0,5) ?? '—'}), não a hora em que a lista foi aberta.<br/>
+                  Se não houve aula nesta data, não abra — os alunos não ficam com falta.
                 </p>
               </div>
               <Button size="sm" onClick={iniciarAula} disabled={iniciando || notYetAvailable}>
-                {iniciando ? 'Iniciando…' : '▶ Iniciar Aula'}
+                {iniciando ? 'Abrindo…' : '▶ Abrir lista de presença'}
               </Button>
               {notYetAvailable && (
                 <p className="text-[10px] text-slate-400">
@@ -531,7 +567,7 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
               {/* Banner: aula iniciada */}
               <div className="mb-3 px-3 py-2 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700 rounded-lg text-xs text-primary-700 dark:text-primary-400 font-medium flex items-center gap-2">
                 <CheckCircle2 size={12} />
-                Aula iniciada às {new Date(chamada.iniciada_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                Aula das {turma.horario?.slice(0,5) ?? '—'} · lista aberta às {new Date(chamada.iniciada_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 {chamada.frequencia_pct != null && ` · ${chamada.frequencia_pct}% frequência`}
               </div>
 
@@ -639,13 +675,13 @@ function AulaModal({ turma, alunos, presencas, registros, justificativas = [], o
         </div>
 
         {/* Aviso: aula encerrada mas sem presença registrada */}
-        {!chamada && !carregandoChamada && nowMins > startMins + (turma?.duracao_min || 60) + 30 && (
+        {!chamada && !carregandoChamada && ehHoje && nowMins > startMins + (turma?.duracao_min || 60) + 30 && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg px-3 py-2.5 flex items-center gap-2">
             <span className="text-lg">⚠️</span>
             <div>
               <p className="text-xs font-bold text-amber-800 dark:text-amber-300">Presença não registrada!</p>
               <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                A aula já encerrou. Clique em <strong>Iniciar Aula</strong> acima e faça a chamada antes de sair.
+                A aula já encerrou. Clique em <strong>Abrir lista de presença</strong> acima e faça a chamada antes de sair.
                 Você tem até meia-noite de hoje para registrar.
               </p>
             </div>
@@ -1994,7 +2030,7 @@ export default function PoloDetalhe() {
                       return 'normal'
                     })()
                     const alunosTurmaCount = alunos.filter(a => a.turma_id === t.id && a.status === 'Ativo').length
-                    const dataHoje = new Date().toISOString().split('T')[0]
+                    const dataHoje = localIso()
                     const presencaHoje = presencas.filter(p => p.turma_id === t.id && p.data === dataHoje)
                     const jaRegistrou = presencaHoje.length > 0
                     const registroHoje = registros.find(r => r.turma_id === t.id && r.data === dataHoje)
