@@ -1,7 +1,8 @@
 // src/pages/PoloDetalhe.jsx
 import { logAcao } from '../lib/auditLog'
+import { buscarAlunoDuplicado, erroCpfCadastro } from '../lib/cpf'
 import { localIso, dentroDaJanelaPresenca } from '../lib/semana'
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { useToast } from '../components/ui/Toast'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useSupabaseData } from '../hooks/useSupabaseData'
@@ -956,8 +957,9 @@ export default function PoloDetalhe() {
   function normNomeAluno(s) {
     return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
   }
-  function validateAlunoForm(form) {
+  function validateAlunoForm(form, exigirCpf = false) {
     const e = {}
+    if (exigirCpf) { const ec = erroCpfCadastro(form); if (ec) e.cpf = ec }
     const nome = (form.nome ?? '').trim()
     if (!nome) e.nome = 'Nome é obrigatório'
     else if (nome.includes('@')) e.nome = 'Parece que há um e-mail no campo Nome — verifique'
@@ -1567,9 +1569,19 @@ export default function PoloDetalhe() {
     setUploadingAtestadoFotoEdit(false)
   }
 
+  // Trava contra duplo toque: o botão só desabilitava DEPOIS da busca de CPF
+  // (lenta), então dois toques seguidos cadastravam o aluno duas vezes.
+  const salvandoAlunoRef = useRef(false)
   async function salvarNovoAluno(forcarSalvar = false) {
+    if (salvandoAlunoRef.current) return
+    salvandoAlunoRef.current = true
+    setSavingAluno(true)
+    try { await salvarNovoAlunoInterno(forcarSalvar) }
+    finally { salvandoAlunoRef.current = false; setSavingAluno(false) }
+  }
+  async function salvarNovoAlunoInterno(forcarSalvar = false) {
     const turmasSelecionadas = novoAlunoMatriculas.filter(m => m.turma_id)
-    const erros = validateAlunoForm({ ...novoAlunoForm, turma_id: turmasSelecionadas[0]?.turma_id ?? '' })
+    const erros = validateAlunoForm({ ...novoAlunoForm, turma_id: turmasSelecionadas[0]?.turma_id ?? '' }, true)
     setNovoAlunoErrors(erros)
     if (Object.keys(erros).length > 0) return
 
@@ -1578,14 +1590,16 @@ export default function PoloDetalhe() {
     // fetch de todo mundo do sistema toda vez que o Polo abre).
     const cpfNorm = novoAlunoForm.cpf ? novoAlunoForm.cpf.replace(/\D/g, '') : ''
     let alunoExistente = null
-    if (cpfNorm.length >= 11) {
-      const { data: candidatos } = await supabase.from('alunos').select('id,nome,cpf,turma_id')
-      alunoExistente = (candidatos ?? []).find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm) ?? null
-    }
+    // Mesmo CPF, ou mesmo nome completo + data de nascimento = mesma pessoa. Vale entre
+    // polos: a aluna fica com UM cadastro e ganha a turma nova (a matrícula em outro polo
+    // é só mais uma turma no cadastro dela, não um cadastro novo).
+    const achado = await buscarAlunoDuplicado({ cpfNorm, nome: novoAlunoForm.nome, dataNasc: novoAlunoForm.data_nasc })
+    alunoExistente = achado?.aluno ?? null
+    const motivoDup = achado?.motivo ?? null
 
     if (!forcarSalvar && alunoExistente) {
       const turmaDup = turmasPolo.find(t => t.id === alunoExistente.turma_id)
-      setDupWarning({ aluno: alunoExistente, turma: turmaDup })
+      setDupWarning({ aluno: alunoExistente, turma: turmaDup, motivo: motivoDup })
       return
     }
 
@@ -1616,7 +1630,9 @@ export default function PoloDetalhe() {
         const { data, error: insertError } = await supabase.from('alunos').insert(payload).select('id').single()
         if (insertError || !data?.id) {
           setSavingAluno(false)
-          setNovoAlunoError('Não foi possível salvar o aluno. Verifique se você tem permissão para esta turma ou tente novamente.')
+          setNovoAlunoError(insertError?.code === '23505'
+            ? 'Este aluno já está cadastrado (mesmo CPF ou mesmo nome e data de nascimento). Feche e busque o aluno na lista.'
+            : 'Não foi possível salvar o aluno. Verifique se você tem permissão para esta turma ou tente novamente.')
           return
         }
         alunoId = data.id
@@ -2947,7 +2963,8 @@ export default function PoloDetalhe() {
               <input type="text" autoComplete="new-password" readOnly onFocus={e => e.currentTarget.removeAttribute('readonly')} value={novoAlunoForm.cpf}
                 onChange={e => setNovoAlunoForm(f => ({ ...f, cpf: e.target.value }))}
                 placeholder="000.000.000-00"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-navy-600 text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                className={`w-full px-3 py-2 rounded-lg border text-sm bg-white dark:bg-navy-700 text-navy-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500 ${novoAlunoErrors.cpf ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : 'border-slate-200 dark:border-navy-600'}`} />
+              {novoAlunoErrors.cpf && <p className="text-[11px] text-red-500 mt-1">⚠ {novoAlunoErrors.cpf}</p>}
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Telefone</label>
@@ -3206,7 +3223,7 @@ export default function PoloDetalhe() {
       <ConfirmDialog
         open={!!dupWarning}
         title="Aluno já cadastrado no sistema"
-        description={`"${dupWarning?.aluno?.nome}" já está cadastrado (mesmo CPF)${dupWarning?.turma ? ` na modalidade ${dupWarning.turma.modalidades?.nome ?? 'turma'}` : ''}. Deseja matriculá-lo na turma selecionada sem criar um novo cadastro?`}
+        description={`"${dupWarning?.aluno?.nome}" já está cadastrado (${dupWarning?.motivo === 'nome' ? 'mesmo nome e data de nascimento' : 'mesmo CPF'})${dupWarning?.turma ? ` na modalidade ${dupWarning.turma.modalidades?.nome ?? 'turma'}` : ''}. Deseja matriculá-lo na turma selecionada sem criar um novo cadastro?`}
         confirmLabel="Matricular na turma"
         confirmVariant="primary"
         onConfirm={() => { setDupWarning(null); salvarNovoAluno(true) }}

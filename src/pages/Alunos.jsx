@@ -1,5 +1,6 @@
 // src/pages/Alunos.jsx
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
+import { buscarAlunoDuplicado, erroCpfCadastro } from '../lib/cpf'
 import { useSupabaseData } from '../hooks/useSupabaseData'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -295,8 +296,9 @@ export default function Alunos() {
     return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
   }
 
-  function validateAlunoFormAlunos(f) {
+  function validateAlunoFormAlunos(f, exigirCpf = false) {
     const e = {}
+    if (exigirCpf) { const ec = erroCpfCadastro(f); if (ec) e.cpf = ec }
     const nome = (f.nome ?? '').trim()
     if (!nome) {
       e.nome = 'Nome é obrigatório'
@@ -318,8 +320,18 @@ export default function Alunos() {
     return e
   }
 
+  // Trava contra duplo toque: o botão só desabilitava DEPOIS da busca de CPF
+  // (lenta), então dois toques seguidos cadastravam o aluno duas vezes.
+  const salvandoRef = useRef(false)
   async function handleSave(forcarSalvar = false) {
-    const errs = validateAlunoFormAlunos(form)
+    if (salvandoRef.current) return
+    salvandoRef.current = true
+    setSaving(true)
+    try { await handleSaveInterno(forcarSalvar) }
+    finally { salvandoRef.current = false; setSaving(false) }
+  }
+  async function handleSaveInterno(forcarSalvar = false) {
+    const errs = validateAlunoFormAlunos(form, !editing)
     if (Object.keys(errs).length > 0) {
       setAlunoErrors(errs)
       return
@@ -332,13 +344,16 @@ export default function Alunos() {
     // continuar valendo cross-polo.
     const cpfNorm = !editing && form.cpf ? form.cpf.replace(/\D/g, '') : ''
     let alunoExistente = null
-    if (cpfNorm.length >= 11) {
-      const { data: candidatos } = await supabase.from('alunos').select('id,nome,cpf,turma_id')
-      alunoExistente = (candidatos ?? []).find(a => a.cpf && a.cpf.replace(/\D/g, '') === cpfNorm) ?? null
+    // Mesmo CPF, ou mesmo nome completo + data de nascimento = mesma pessoa, inclusive entre polos.
+    let motivoDup = null
+    if (!editing) {
+      const achado = await buscarAlunoDuplicado({ cpfNorm, nome: form.nome, dataNasc: form.data_nasc })
+      alunoExistente = achado?.aluno ?? null
+      motivoDup = achado?.motivo ?? null
     }
 
     if (!editing && !forcarSalvar && alunoExistente) {
-      setDupWarningAlunos({ aluno: alunoExistente })
+      setDupWarningAlunos({ aluno: alunoExistente, motivo: motivoDup })
       return
     }
 
@@ -749,8 +764,9 @@ export default function Alunos() {
                 value={form.cpf}
                 onChange={e => setField('cpf', e.target.value)}
                 placeholder="000.000.000-00"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className={`w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 ${alunoErrors.cpf ? 'border-red-400 focus:ring-red-400' : 'border-slate-200'}`}
               />
+              {alunoErrors.cpf && <p className="mt-1 text-xs text-red-500">{alunoErrors.cpf}</p>}
             </div>
 
             {/* Telefone */}
@@ -1041,7 +1057,7 @@ export default function Alunos() {
       <ConfirmDialog
         open={!!dupWarningAlunos}
         title="Aluno já cadastrado no sistema"
-        description={`"${dupWarningAlunos?.aluno?.nome}" já está cadastrado com esse CPF. Deseja matriculá-lo nas turmas selecionadas sem criar um novo cadastro?`}
+        description={`"${dupWarningAlunos?.aluno?.nome}" já está cadastrado (${dupWarningAlunos?.motivo === 'nome' ? 'mesmo nome e data de nascimento' : 'mesmo CPF'}). Deseja matriculá-lo nas turmas selecionadas sem criar um novo cadastro?`}
         confirmLabel="Matricular nas turmas"
         confirmVariant="primary"
         onConfirm={() => { setDupWarningAlunos(null); handleSave(true) }}
