@@ -765,7 +765,7 @@ export default function PoloDetalhe() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { dark } = useTheme()
-  const { isAdmin, isCoordenador, isProfessor, isEstagiario, profile } = useAuth()
+  const { isAdmin, isCoordenador, isProfessor, isEstagiario, isOwner, profile } = useAuth()
   const { offline, pending, addToQueue } = useOfflineQueue()
   const { showToast, toastEl } = useToast()
 
@@ -1779,7 +1779,8 @@ export default function PoloDetalhe() {
           {canMaterial && (
             <TabBtn active={tab === 'material'} onClick={() => setTab('material')}>📦 Material</TabBtn>
           )}
-          {isAdmin && (
+          {/* Treinos: só o dono do sistema (conta "Administrador SMEL") — piloto */}
+          {isOwner && (
             <TabBtn active={tab === 'treinos'} onClick={() => setTab('treinos')}>🏋️ Treinos</TabBtn>
           )}
         </div>
@@ -2491,7 +2492,7 @@ export default function PoloDetalhe() {
         )}
 
         {/* ─── TREINOS (gerador de treino funcional — piloto, só admin) ─── */}
-        {tab === 'treinos' && isAdmin && (
+        {tab === 'treinos' && isOwner && (
           <TreinoPolo poloId={id} poloNome={polo?.bairro ?? polo?.nome} />
         )}
 
