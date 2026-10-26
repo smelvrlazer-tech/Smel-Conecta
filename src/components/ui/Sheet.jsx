@@ -28,7 +28,7 @@ export default function Sheet({ open, onClose, title, subtitle, children, footer
           </button>
         </div>
         <div className="overflow-y-auto px-5 pb-4 flex-1">{children}</div>
-        {footer && <div className="px-5 py-4 border-t border-slate-100 dark:border-navy-700 flex gap-2 justify-end">{footer}</div>}
+        {footer && <div className="px-5 py-4 border-t border-slate-100 dark:border-navy-700 flex flex-wrap gap-2 justify-end">{footer}</div>}
       </div>
     </div>
   )

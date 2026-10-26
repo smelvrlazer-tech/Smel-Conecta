@@ -60,3 +60,26 @@ export const TIPO_MOV = {
   estado: 'Mudou de estado',
   transferencia: 'Realocado',
 }
+
+// Compara nomes sem acento, maiúscula nem espaço sobrando.
+export const norm = (s) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+
+// Modelos do catálogo que parecem ser o mesmo que o nome digitado
+// (evita cadastrar "Bola Futsal" e "Bola de futsal oficial" como se fossem coisas diferentes).
+export function modelosParecidos(catalogo, texto, limite = 4) {
+  const alvo = norm(texto)
+  if (alvo.length < 3) return []
+  const palavras = alvo.split(' ').filter(p => p.length > 2 && !['de', 'da', 'do', 'para'].includes(p))
+  return catalogo
+    .map(m => {
+      const n = norm(m.nome)
+      if (n === alvo) return { m, pontos: 100 }
+      if (n.includes(alvo) || alvo.includes(n)) return { m, pontos: 60 }
+      const comuns = palavras.filter(p => n.includes(p)).length
+      return { m, pontos: palavras.length ? Math.round((comuns / palavras.length) * 50) : 0 }
+    })
+    .filter(x => x.pontos >= 30)
+    .sort((a, b) => b.pontos - a.pontos)
+    .slice(0, limite)
+    .map(x => x.m)
+}
