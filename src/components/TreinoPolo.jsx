@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Shuffle, Copy, Minus, Plus, Repeat2, Trash2 } from 'lucide-react'
 import Sheet from './ui/Sheet'
+import ConfirmDialog from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 import { RECURSOS, RECURSOS_AGUA_LIMPA } from '../lib/treino/exercicios'
 import { MODELOS, TIPOS_MODELO } from '../lib/treino/modelos'
@@ -32,21 +33,29 @@ const Rotulo = ({ children }) => <div className="text-sm font-semibold text-slat
 
 const CHAVE = (poloId) => `smel_treino_${poloId}`
 
-function ListaProntos({ recursos, onUsar }) {
+function ListaProntos({ recursos, ocultos, onUsar, onApagar, onRestaurar }) {
   const [tipo, setTipo] = useState('todos')
-  const lista = MODELOS.filter(m => tipo === 'todos' || m.tipo === tipo)
-  const contagem = (t) => MODELOS.filter(m => m.tipo === t).length
+  const [apagando, setApagando] = useState(null)       // modelo a apagar, ou 'faltam'
+  const visiveis = MODELOS.filter(m => !ocultos.includes(m.id))
+  const apagados = MODELOS.filter(m => ocultos.includes(m.id))
+  const lista = tipo === 'apagados' ? apagados : visiveis.filter(m => tipo === 'todos' || m.tipo === tipo)
+  const contagem = (t) => visiveis.filter(m => m.tipo === t).length
+  const faltaMaterial = (m) => m.recursos.filter(r => !recursos.includes(r) && !(m.trocas ?? []).some(t => t.precisa === r))
+  const semMaterial = visiveis.filter(m => faltaMaterial(m).length > 0)
   return (
     <div className="space-y-3">
       <div className={`${card} p-4`}>
         <h2 className="text-lg font-bold text-navy-900 dark:text-white">Treinos prontos</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Seus treinos de exemplo. Toque em "Usar" e o sistema completa o que faltar (mobilidade, aquecimento, alongamento).</p>
         <Opcoes valor={tipo} onChange={setTipo}
-          opcoes={[['todos', `Todos (${MODELOS.length})`], ...Object.entries(TIPOS_MODELO).map(([k, v]) => [k, `${v.label} (${contagem(k)})`])]} />
+          opcoes={[['todos', `Todos (${visiveis.length})`], ...Object.entries(TIPOS_MODELO).map(([k, v]) => [k, `${v.label} (${contagem(k)})`]), ...(apagados.length ? [['apagados', `Apagados (${apagados.length})`]] : [])]} />
+        {tipo !== 'apagados' && semMaterial.length > 0 && (
+          <button onClick={() => setApagando('faltam')} className={`${btnGhost} mt-3 w-full sm:w-auto`}>Apagar os {semMaterial.length} que precisam de material que o polo não tem</button>
+        )}
       </div>
       <ul className="grid gap-3 md:grid-cols-2">
         {lista.map(m => {
-          const faltam = m.recursos.filter(r => !recursos.includes(r) && !(m.trocas ?? []).some(t => t.precisa === r))
+          const faltam = faltaMaterial(m)
           const tp = TIPOS_MODELO[m.tipo]
           return (
             <li key={m.id} className={`${card} p-4 flex flex-col gap-2`}>
@@ -63,11 +72,26 @@ function ListaProntos({ recursos, onUsar }) {
                 {m.principal.itens.length > 4 && <li className="text-slate-400 list-none -ml-5">+ {m.principal.itens.length - 4} exercícios</li>}
               </ul>
               {faltam.length > 0 && <div className="text-sm text-amber-700 dark:text-amber-300">⚠️ Precisa de: {faltam.map(r => RECURSOS[r] ?? r).join(', ')}</div>}
-              <button onClick={() => onUsar(m)} className={`${btnPrimary} w-full mt-1`}>Usar este treino</button>
+              {tipo === 'apagados'
+                ? <button onClick={() => onRestaurar(m.id)} className={`${btnGhost} w-full mt-1`}>Restaurar este treino</button>
+                : (
+                  <div className="grid grid-cols-[1fr_auto] gap-2 mt-1">
+                    <button onClick={() => onUsar(m)} className={`${btnPrimary} w-full`}>Usar este treino</button>
+                    <button onClick={() => setApagando(m)} aria-label={`Apagar ${m.nome}`} className={`${btnGhost} px-4`}><Trash2 size={18} /></button>
+                  </div>
+                )}
             </li>
           )
         })}
       </ul>
+      {lista.length === 0 && <div className={`${card} p-8 text-center text-slate-500 dark:text-slate-400`}>Nenhum treino nesta lista.</div>}
+
+      <ConfirmDialog open={!!apagando} onClose={() => setApagando(null)} confirmLabel="Apagar"
+        title={apagando === 'faltam' ? 'Apagar treinos sem material?' : `Apagar "${apagando?.nome}"?`}
+        description={apagando === 'faltam'
+          ? `${semMaterial.length} treinos precisam de material que este polo não tem e saem da lista. Dá para restaurar depois em "Apagados".`
+          : 'O treino sai da lista deste polo. Dá para restaurar depois em "Apagados".'}
+        onConfirm={() => onApagar(apagando === 'faltam' ? semMaterial.map(m => m.id) : [apagando.id])} />
     </div>
   )
 }
@@ -79,6 +103,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
   const [recentes, setRecentes] = useState([])
   const [treino, setTreino] = useState(null)
   const [trocando, setTrocando] = useState(null) // { blocoId, idx }
+  const [ocultos, setOcultos] = useState([])
   const [modo, setModo] = useState('auto')    // 'auto' (gerar) | 'prontos' (treinos prontos)
 
   // lembra as últimas escolhas deste polo neste aparelho (e os exercícios usados, para variar)
@@ -87,12 +112,21 @@ export default function TreinoPolo({ poloId, poloNome }) {
       const salvo = JSON.parse(localStorage.getItem(CHAVE(poloId)) || 'null')
       if (salvo?.cfg) setCfg({ ...padrao, ...salvo.cfg })
       if (salvo?.recentes) setRecentes(salvo.recentes)
+      const oc = JSON.parse(localStorage.getItem(`smel_treino_ocultos_${poloId}`) || '[]')
+      if (Array.isArray(oc)) setOcultos(oc)
     } catch { /* sem armazenamento: segue com o padrão */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poloId])
   const guardar = useCallback((c, r) => {
     try { localStorage.setItem(CHAVE(poloId), JSON.stringify({ cfg: c, recentes: r })) } catch { /* ignora */ }
   }, [poloId])
+
+  const salvarOcultos = (lista) => {
+    setOcultos(lista)
+    try { localStorage.setItem(`smel_treino_ocultos_${poloId}`, JSON.stringify(lista)) } catch { /* ignora */ }
+  }
+  const apagarTreinos = (ids) => salvarOcultos([...new Set([...ocultos, ...ids])])
+  const restaurarTreino = (id) => salvarOcultos(ocultos.filter(x => x !== id))
 
   const set = (k, v) => setCfg(c => ({ ...c, [k]: v }))
   const alternarRecurso = (k) => setCfg(c => ({ ...c, recursos: c.recursos.includes(k) ? c.recursos.filter(x => x !== k) : [...c.recursos, k] }))
@@ -194,7 +228,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
       {/* ── Treino gerado ── */}
       <section className="space-y-3 min-w-0">
         {modo === 'prontos' && !treino?.config?.modeloId ? (
-          <ListaProntos recursos={cfg.recursos} onUsar={usarModelo} />
+          <ListaProntos recursos={cfg.recursos} ocultos={ocultos} onUsar={usarModelo} onApagar={apagarTreinos} onRestaurar={restaurarTreino} />
         ) : !treino ? (
           <div className={`${card} p-10 text-center`}>
             <p className="font-semibold text-navy-900 dark:text-white mb-1">Nenhum treino gerado ainda</p>
