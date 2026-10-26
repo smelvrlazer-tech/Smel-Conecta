@@ -13,6 +13,7 @@ export const FORMATOS = {
   fortime:  { label: 'For time', desc: 'Sequência o mais rápido possível, com limite de tempo' },
   livre:    { label: 'Funcional livre', desc: 'Sequência contínua, ritmo do aluno' },
   escadaria:{ label: 'Escadaria', desc: 'Treino usando a escada do polo (sobe e desce com exercícios)' },
+  mobilidade:{ label: 'Mobilidade e alongamento', desc: 'Aula de mobilidade, controle e alongamento — sem impacto' },
 }
 
 export const FOCOS = {
@@ -60,8 +61,9 @@ export function opcoesDisponiveis(recursos) {
 export function gerarTreino(cfg) {
   const {
     formato = 'circuito', foco = 'pernas', nivel = 'i', alunos = 8, organizacao = 'individual',
-    duracao = 40, recursos = [], semente = Date.now(), evitar = [],
+    duracao = 40, recursos = [], semente = Date.now(), evitar = [], baixoImpacto = false, modelo = null,
   } = cfg
+  const semImpacto = baixoImpacto || formato === 'mobilidade'
   const rand = rng(semente)
   const evit = new Set(evitar.map(n => n.toLowerCase()))
   const grupoTam = organizacao === 'duplas' ? 2 : organizacao === 'trios' ? 3 : 1
@@ -74,7 +76,7 @@ export function gerarTreino(cfg) {
   const principalMin = Math.max(10, duracao - mob - aquec - calma)
 
   const usados = new Set()
-  const pool = (lista) => lista.filter(e => temRecursos(e, recursos) && nivelOk(e, nivelCod))
+  const pool = (lista) => lista.filter(e => temRecursos(e, recursos) && nivelOk(e, nivelCod) && (!semImpacto || e.imp === 'baixo'))
 
   // escolhe um exercício de um "papel" (slot), evitando repetir e os usados recentemente
   function escolher(slot, lista = PRINCIPAIS, extra = () => true) {
@@ -235,6 +237,16 @@ export function gerarTreino(cfg) {
     principal.regra = `${rounds} rounds for time · limite ${principalMin} min`
     principal.itens = lista.map((e, i) => item(e, { reps: `${base[i]} reps` }))
     principal.obs = ['Anote o tempo final de cada aluno.', regraDupla].filter(Boolean).join(' ')
+  } else if (formato === 'mobilidade') {
+    const mobs = embaralhar(rand, pool(MOBILIDADE)).slice(0, 5)
+    const cores = escolherVarios(['isometria', 'core', 'isometria'], extraEscada)
+    const alos = embaralhar(rand, pool(ALONGAMENTO)).slice(0, 3)
+    const todos = [...mobs.map(e => item(e)), ...cores.map(e => item(e)), ...alos.map(e => item(e))]
+    const voltas = 2
+    const seg = Math.max(30, Math.round((principalMin * 60) / (todos.length * voltas) / 5) * 5)
+    principal.regra = `Fluxo contínuo · ${todos.length} posições · ${seg}s cada · ${voltas} voltas · movimentos lentos e controlados`
+    principal.itens = todos
+    principal.obs = 'Sem impacto: respire fundo e respeite o limite de cada articulação.'
   } else { // livre
     const n = principalMin >= 20 ? 7 : 6
     const lista = exerciciosPrincipais(n, extraEscada)
@@ -242,6 +254,7 @@ export function gerarTreino(cfg) {
     principal.itens = lista.map(e => item(e, { reps: repsDe(e) }))
   }
   blocos.push(principal)
+  if (modelo) aplicarModelo(blocos, modelo, recursos)
 
   // 4) Alongamento / volta à calma
   {
@@ -250,8 +263,8 @@ export function gerarTreino(cfg) {
   }
 
   return {
-    titulo: `${sortear(rand, NOMES[foco] ?? ['TREINO'])} — ${FOCOS[foco].label}`,
-    config: { formato, foco, nivel, alunos, organizacao, duracao, recursos, semente },
+    titulo: modelo ? `Dia ${modelo.dia} · ${modelo.nome}` : `${sortear(rand, NOMES[foco] ?? ['TREINO'])} — ${FOCOS[foco].label}`,
+    config: { formato, foco, nivel, alunos, organizacao, duracao, recursos, semente, baixoImpacto, modeloId: modelo?.id ?? null },
     blocos,
   }
 }
@@ -294,5 +307,24 @@ export function trocarItem(treino, blocoId, idx, novo) {
       else itens.splice(idx, 1)
       return { ...b, itens }
     }),
+  }
+}
+
+// Monta os blocos de um "treino pronto": usa a mobilidade/aquecimento do modelo (se tiver) e a parte principal dele.
+// Se faltar um corda/bola etc., troca o exercício pelo substituto indicado no modelo.
+function aplicarModelo(blocos, modelo, recursos) {
+  const trocar = (nome) => {
+    for (const t of modelo.trocas ?? []) if (nome.includes(t.de) && !recursos.includes(t.precisa)) return nome.replace(t.de, t.para)
+    return nome
+  }
+  const paraItens = (lista) => lista.map(x => (typeof x === 'string' ? { nome: trocar(x) } : { ...x, nome: trocar(x.nome) }))
+  const i = (id) => blocos.findIndex(b => b.id === id)
+  if (modelo.mobilidade) blocos[i('mobilidade')] = { ...blocos[i('mobilidade')], regra: modelo.mobilidadeRegra ?? '', itens: paraItens(modelo.mobilidade) }
+  if (modelo.aquecimento) blocos[i('aquecimento')] = { ...blocos[i('aquecimento')], regra: modelo.aquecimentoRegra ?? '', itens: paraItens(modelo.aquecimento) }
+  const pr = modelo.principal
+  const idx = i('principal')
+  blocos[idx] = {
+    ...blocos[idx], titulo: pr.titulo ?? blocos[idx].titulo, minutos: pr.minutos ?? blocos[idx].minutos,
+    regra: pr.regra ?? '', itens: paraItens(pr.itens), obs: [pr.obs, ...(modelo.trocas ?? []).filter(t => !recursos.includes(t.precisa)).map(t => `Sem ${t.precisa}: ${t.de} → ${t.para}.`)].filter(Boolean).join(' '),
   }
 }

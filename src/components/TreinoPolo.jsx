@@ -5,6 +5,7 @@ import { Shuffle, Copy, Minus, Plus, Repeat2, Trash2 } from 'lucide-react'
 import Sheet from './ui/Sheet'
 import { useToast } from './ui/Toast'
 import { RECURSOS, RECURSOS_AGUA_LIMPA } from '../lib/treino/exercicios'
+import { MODELOS, TIPOS_MODELO } from '../lib/treino/modelos'
 import {
   FORMATOS, FOCOS, ORGANIZACOES, gerarTreino, textoWhatsApp, alternativasPara, trocarItem,
 } from '../lib/treino/gerador'
@@ -31,13 +32,54 @@ const Rotulo = ({ children }) => <div className="text-sm font-semibold text-slat
 
 const CHAVE = (poloId) => `smel_treino_${poloId}`
 
+function ListaProntos({ recursos, onUsar }) {
+  const [tipo, setTipo] = useState('todos')
+  const lista = MODELOS.filter(m => tipo === 'todos' || m.tipo === tipo)
+  const contagem = (t) => MODELOS.filter(m => m.tipo === t).length
+  return (
+    <div className="space-y-3">
+      <div className={`${card} p-4`}>
+        <h2 className="text-lg font-bold text-navy-900 dark:text-white">Treinos prontos</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Seus treinos de exemplo. Toque em "Usar" e o sistema completa o que faltar (mobilidade, aquecimento, alongamento).</p>
+        <Opcoes valor={tipo} onChange={setTipo}
+          opcoes={[['todos', `Todos (${MODELOS.length})`], ...Object.entries(TIPOS_MODELO).map(([k, v]) => [k, `${v.label} (${contagem(k)})`])]} />
+      </div>
+      <ul className="grid gap-3 md:grid-cols-2">
+        {lista.map(m => {
+          const faltam = m.recursos.filter(r => !recursos.includes(r) && !(m.trocas ?? []).some(t => t.precisa === r))
+          const tp = TIPOS_MODELO[m.tipo]
+          return (
+            <li key={m.id} className={`${card} p-4 flex flex-col gap-2`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-400">Dia {m.dia}</div>
+                  <div className="text-base font-bold text-navy-900 dark:text-white leading-snug">{m.nome}</div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400">{m.foco} · {FORMATOS[m.formato].label}{m.dupla ? ' · duplas' : ''}</div>
+                </div>
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${tp.cls}`} title={tp.dica}>{tp.label}</span>
+              </div>
+              <ul className="text-sm text-slate-600 dark:text-slate-300 list-disc pl-5 space-y-0.5">
+                {m.principal.itens.slice(0, 4).map(i => <li key={typeof i === 'string' ? i : i.nome} className="break-words">{typeof i === 'string' ? i : i.nome}</li>)}
+                {m.principal.itens.length > 4 && <li className="text-slate-400 list-none -ml-5">+ {m.principal.itens.length - 4} exercícios</li>}
+              </ul>
+              {faltam.length > 0 && <div className="text-sm text-amber-700 dark:text-amber-300">⚠️ Precisa de: {faltam.map(r => RECURSOS[r] ?? r).join(', ')}</div>}
+              <button onClick={() => onUsar(m)} className={`${btnPrimary} w-full mt-1`}>Usar este treino</button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 export default function TreinoPolo({ poloId, poloNome }) {
   const { showToast, toastEl } = useToast()
-  const padrao = { formato: 'circuito', foco: 'pernas', nivel: 'i', alunos: 8, organizacao: 'individual', duracao: 40, recursos: RECURSOS_AGUA_LIMPA }
+  const padrao = { formato: 'circuito', foco: 'pernas', nivel: 'i', alunos: 8, organizacao: 'individual', duracao: 40, recursos: RECURSOS_AGUA_LIMPA, baixoImpacto: false }
   const [cfg, setCfg] = useState(padrao)
   const [recentes, setRecentes] = useState([])
   const [treino, setTreino] = useState(null)
   const [trocando, setTrocando] = useState(null) // { blocoId, idx }
+  const [modo, setModo] = useState('auto')    // 'auto' (gerar) | 'prontos' (treinos prontos)
 
   // lembra as últimas escolhas deste polo neste aparelho (e os exercícios usados, para variar)
   useEffect(() => {
@@ -63,6 +105,11 @@ export default function TreinoPolo({ poloId, poloNome }) {
     setRecentes(novosRecentes); guardar(cfg, novosRecentes)
   }
 
+  function usarModelo(m) {
+    const t = gerarTreino({ ...cfg, formato: m.formato, modelo: m, semente: Math.floor(Math.random() * 1e9), evitar: [] })
+    setTreino(t); guardar(cfg, recentes)
+  }
+
   async function copiar() {
     try { await navigator.clipboard.writeText(textoWhatsApp(treino)); showToast('Treino copiado! Cole no WhatsApp.', 'success') }
     catch { showToast('Não consegui copiar. Selecione o texto e copie manualmente.', 'error') }
@@ -83,6 +130,14 @@ export default function TreinoPolo({ poloId, poloNome }) {
           <p className="text-sm text-slate-500 dark:text-slate-400">{poloNome} · funcional</p>
         </div>
 
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-navy-700">
+          {[['auto', 'Gerar automático'], ['prontos', 'Treinos prontos']].map(([k, rot]) => (
+            <button key={k} type="button" onClick={() => { setModo(k); setTreino(null) }}
+              className={`h-11 rounded-lg text-sm font-semibold ${modo === k ? 'bg-primary-500 text-primary-950' : 'text-slate-500 dark:text-slate-300'}`}>{rot}</button>
+          ))}
+        </div>
+
+        {modo === 'auto' && (<>
         <div><Rotulo>Formato</Rotulo>
           <Opcoes valor={cfg.formato} onChange={v => set('formato', v)}
             opcoes={Object.entries(FORMATOS).filter(([k]) => k !== 'escadaria' || cfg.recursos.includes('escada')).map(([k, v]) => [k, v.label])} />
@@ -94,6 +149,8 @@ export default function TreinoPolo({ poloId, poloNome }) {
 
         <div><Rotulo>Nível da turma</Rotulo>
           <Opcoes valor={cfg.nivel} onChange={v => set('nivel', v)} opcoes={[['i', 'Intermediário'], ['a', 'Avançado']]} /></div>
+
+        </>)}
 
         <div><Rotulo>Como os alunos fazem</Rotulo>
           <Opcoes valor={cfg.organizacao} onChange={v => set('organizacao', v)} opcoes={Object.entries(ORGANIZACOES)} /></div>
@@ -126,12 +183,19 @@ export default function TreinoPolo({ poloId, poloNome }) {
           </div>
         </div>
 
-        <button onClick={gerar} className={`${btnPrimary} w-full`}><Shuffle size={18} /> {treino ? 'Gerar outro treino' : 'Gerar treino'}</button>
+        <label className={`flex items-center gap-3 min-h-11 px-3 rounded-xl border cursor-pointer text-sm ${cfg.baixoImpacto ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-navy-900 dark:text-white font-semibold' : 'border-slate-200 dark:border-navy-600 text-slate-500 dark:text-slate-400'}`}>
+          <input type="checkbox" className="h-4 w-4 accent-primary-600" checked={cfg.baixoImpacto} onChange={e => set('baixoImpacto', e.target.checked)} />
+          Sem impacto (sem saltos nem corrida forte)
+        </label>
+
+        {modo === 'auto' && <button onClick={gerar} className={`${btnPrimary} w-full`}><Shuffle size={18} /> {treino ? 'Gerar outro treino' : 'Gerar treino'}</button>}
       </section>
 
       {/* ── Treino gerado ── */}
       <section className="space-y-3 min-w-0">
-        {!treino ? (
+        {modo === 'prontos' && !treino?.config?.modeloId ? (
+          <ListaProntos recursos={cfg.recursos} onUsar={usarModelo} />
+        ) : !treino ? (
           <div className={`${card} p-10 text-center`}>
             <p className="font-semibold text-navy-900 dark:text-white mb-1">Nenhum treino gerado ainda</p>
             <p className="text-sm text-slate-500 dark:text-slate-400">Escolha as opções e toque em "Gerar treino". Você pode trocar qualquer exercício depois.</p>
@@ -144,7 +208,9 @@ export default function TreinoPolo({ poloId, poloNome }) {
                 <p className="text-sm text-slate-500 dark:text-slate-400">{FORMATOS[treino.config.formato].label} · {treino.config.duracao} min · {ORGANIZACOES[treino.config.organizacao]} · {treino.config.alunos} alunos</p>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <button onClick={gerar} className={btnGhost}><Shuffle size={16} /> Sortear de novo</button>
+                {treino.config.modeloId
+                  ? <button onClick={() => setTreino(null)} className={btnGhost}>← Outros treinos</button>
+                  : <button onClick={gerar} className={btnGhost}><Shuffle size={16} /> Sortear de novo</button>}
                 <button onClick={copiar} className={btnPrimary}><Copy size={16} /> Copiar para WhatsApp</button>
               </div>
             </div>
