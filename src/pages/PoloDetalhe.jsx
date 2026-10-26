@@ -24,6 +24,7 @@ import {
 import { NovoFuncionarioModal, EditarFuncionarioModal, salvarVinculos } from './Equipes'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import MaterialPolo from '../components/MaterialPolo'
+import TreinoPolo from '../components/TreinoPolo'
 import { subDays, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -1778,6 +1779,9 @@ export default function PoloDetalhe() {
           {canMaterial && (
             <TabBtn active={tab === 'material'} onClick={() => setTab('material')}>📦 Material</TabBtn>
           )}
+          {isAdmin && (
+            <TabBtn active={tab === 'treinos'} onClick={() => setTab('treinos')}>🏋️ Treinos</TabBtn>
+          )}
         </div>
 
         {/* ─── VISÃO GERAL ──────────────────────────────────────────── */}
@@ -2484,6 +2488,11 @@ export default function PoloDetalhe() {
         {/* ─── MATERIAL (inventário do polo) ─────────────────────────── */}
         {tab === 'material' && canMaterial && (
           <MaterialPolo poloId={id} poloNome={polo?.bairro ?? polo?.nome} isAdmin={isAdmin} />
+        )}
+
+        {/* ─── TREINOS (gerador de treino funcional — piloto, só admin) ─── */}
+        {tab === 'treinos' && isAdmin && (
+          <TreinoPolo poloId={id} poloNome={polo?.bairro ?? polo?.nome} />
         )}
 
         {tab === 'alunos' && (
