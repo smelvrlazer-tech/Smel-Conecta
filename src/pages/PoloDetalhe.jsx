@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { NovoFuncionarioModal, EditarFuncionarioModal, salvarVinculos } from './Equipes'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import MaterialPolo from '../components/MaterialPolo'
 import { subDays, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -1064,6 +1065,10 @@ export default function PoloDetalhe() {
     return atribuicoes.some(a => a.usuario_id === profile?.id && a.polo_id === id)
   }, [isAdmin, atribuicoes, loadingAtribuicoes, profile, id])
 
+  // Inventário de material: SÓ admin e coordenador deste polo (professor e
+  // estagiário não têm acesso nem visualização — o banco também bloqueia).
+  const canMaterial = isAdmin || (isCoordenador && canEditPolo)
+
   const canEditTurma = useMemo(() => (t) => {
     if (isAdmin) return true
     if (!profile) return false
@@ -1770,6 +1775,9 @@ export default function PoloDetalhe() {
           {canEditPolo && (
             <TabBtn active={tab === 'alunos'} onClick={() => setTab('alunos')}>👥 Alunos</TabBtn>
           )}
+          {canMaterial && (
+            <TabBtn active={tab === 'material'} onClick={() => setTab('material')}>📦 Material</TabBtn>
+          )}
         </div>
 
         {/* ─── VISÃO GERAL ──────────────────────────────────────────── */}
@@ -2473,6 +2481,11 @@ export default function PoloDetalhe() {
           </div>
         )}
         {/* ─── ABA ALUNOS ──────────────────────────────────────────── */}
+        {/* ─── MATERIAL (inventário do polo) ─────────────────────────── */}
+        {tab === 'material' && canMaterial && (
+          <MaterialPolo poloId={id} poloNome={polo?.bairro ?? polo?.nome} isAdmin={isAdmin} />
+        )}
+
         {tab === 'alunos' && (
           <div className="space-y-4">
             {/* Sub-tabs */}
