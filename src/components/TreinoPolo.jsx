@@ -8,7 +8,7 @@ import { useToast } from './ui/Toast'
 import { RECURSOS, RECURSOS_AGUA_LIMPA } from '../lib/treino/exercicios'
 import { MODELOS, TIPOS_MODELO } from '../lib/treino/modelos'
 import {
-  FORMATOS, FOCOS, ORGANIZACOES, gerarTreino, textoWhatsApp, alternativasPara, trocarItem,
+  FORMATOS, FOCOS, ORGANIZACOES, gerarTreino, textoWhatsApp, alternativasPara, trocarItem, resolverAutomatico,
 } from '../lib/treino/gerador'
 
 const inputCls = 'h-12 px-4 rounded-xl border border-slate-200 dark:border-navy-600 bg-white dark:bg-navy-700 text-base text-navy-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500'
@@ -33,7 +33,7 @@ const Rotulo = ({ children }) => <div className="text-sm font-semibold text-slat
 
 const CHAVE = (poloId) => `smel_treino_${poloId}`
 
-function ListaProntos({ recursos, ocultos, onUsar, onApagar, onRestaurar }) {
+function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar }) {
   const [tipo, setTipo] = useState('todos')
   const [apagando, setApagando] = useState(null)       // modelo a apagar, ou 'faltam'
   const visiveis = MODELOS.filter(m => !ocultos.includes(m.id))
@@ -76,7 +76,7 @@ function ListaProntos({ recursos, ocultos, onUsar, onApagar, onRestaurar }) {
                 ? <button onClick={() => onRestaurar(m.id)} className={`${btnGhost} w-full mt-1`}>Restaurar este treino</button>
                 : (
                   <div className="grid grid-cols-[1fr_auto] gap-2 mt-1">
-                    <button onClick={() => onUsar(m)} className={`${btnPrimary} w-full`}>Usar este treino</button>
+                    <button onClick={() => onUsar(m)} disabled={!pronto} className={`${btnPrimary} w-full`}>{pronto ? 'Usar este treino' : 'Marque nível e alunos'}</button>
                     <button onClick={() => setApagando(m)} aria-label={`Apagar ${m.nome}`} className={`${btnGhost} px-4`}><Trash2 size={18} /></button>
                   </div>
                 )}
@@ -98,27 +98,29 @@ function ListaProntos({ recursos, ocultos, onUsar, onApagar, onRestaurar }) {
 
 export default function TreinoPolo({ poloId, poloNome }) {
   const { showToast, toastEl } = useToast()
-  const padrao = { formato: 'circuito', foco: 'pernas', nivel: 'i', alunos: 8, organizacao: 'individual', duracao: 40, recursos: RECURSOS_AGUA_LIMPA, baixoImpacto: false }
+  const padrao = { formato: 'auto', foco: 'auto', nivel: null, alunos: null, organizacao: 'auto', duracao: 40, recursos: RECURSOS_AGUA_LIMPA, baixoImpacto: false }
   const [cfg, setCfg] = useState(padrao)
   const [recentes, setRecentes] = useState([])
   const [treino, setTreino] = useState(null)
   const [trocando, setTrocando] = useState(null) // { blocoId, idx }
   const [ocultos, setOcultos] = useState([])
+  const [historico, setHistorico] = useState([])   // últimos treinos (formato/foco/organização), para o modo automático variar
   const [modo, setModo] = useState('auto')    // 'auto' (gerar) | 'prontos' (treinos prontos)
 
   // lembra as últimas escolhas deste polo neste aparelho (e os exercícios usados, para variar)
   useEffect(() => {
     try {
       const salvo = JSON.parse(localStorage.getItem(CHAVE(poloId)) || 'null')
-      if (salvo?.cfg) setCfg({ ...padrao, ...salvo.cfg })
+      if (salvo?.cfg) setCfg({ ...padrao, ...salvo.cfg, nivel: null, alunos: null }) // nível e nº de alunos: sempre marcar de novo
       if (salvo?.recentes) setRecentes(salvo.recentes)
+      if (Array.isArray(salvo?.historico)) setHistorico(salvo.historico)
       const oc = JSON.parse(localStorage.getItem(`smel_treino_ocultos_${poloId}`) || '[]')
       if (Array.isArray(oc)) setOcultos(oc)
     } catch { /* sem armazenamento: segue com o padrão */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poloId])
-  const guardar = useCallback((c, r) => {
-    try { localStorage.setItem(CHAVE(poloId), JSON.stringify({ cfg: c, recentes: r })) } catch { /* ignora */ }
+  const guardar = useCallback((c, r, h) => {
+    try { localStorage.setItem(CHAVE(poloId), JSON.stringify({ cfg: c, recentes: r, historico: h })) } catch { /* ignora */ }
   }, [poloId])
 
   const salvarOcultos = (lista) => {
@@ -128,20 +130,33 @@ export default function TreinoPolo({ poloId, poloNome }) {
   const apagarTreinos = (ids) => salvarOcultos([...new Set([...ocultos, ...ids])])
   const restaurarTreino = (id) => salvarOcultos(ocultos.filter(x => x !== id))
 
+  const pronto = !!cfg.nivel && !!cfg.alunos
+
   const set = (k, v) => setCfg(c => ({ ...c, [k]: v }))
   const alternarRecurso = (k) => setCfg(c => ({ ...c, recursos: c.recursos.includes(k) ? c.recursos.filter(x => x !== k) : [...c.recursos, k] }))
 
   function gerar() {
-    const t = gerarTreino({ ...cfg, semente: Math.floor(Math.random() * 1e9), evitar: recentes })
+    if (!pronto) return
+    // o que estiver em "Automático" é escolhido pelo sistema (variando a rotina)
+    const esc = resolverAutomatico(cfg, historico)
+    const real = { ...cfg, formato: esc.formato, foco: esc.foco, organizacao: esc.organizacao }
+    const t = gerarTreino({ ...real, semente: Math.floor(Math.random() * 1e9), evitar: recentes })
+    t.automatico = esc.automatico
     setTreino(t)
     const usados = t.blocos.find(b => b.id === 'principal').itens.map(i => i.nome)
     const novosRecentes = [...usados, ...recentes].slice(0, 30)
-    setRecentes(novosRecentes); guardar(cfg, novosRecentes)
+    const novoHistorico = [{ formato: real.formato, foco: real.foco, organizacao: real.organizacao }, ...historico].slice(0, 8)
+    setRecentes(novosRecentes); setHistorico(novoHistorico); guardar(cfg, novosRecentes, novoHistorico)
   }
 
   function usarModelo(m) {
-    const t = gerarTreino({ ...cfg, formato: m.formato, modelo: m, semente: Math.floor(Math.random() * 1e9), evitar: [] })
-    setTreino(t); guardar(cfg, recentes)
+    if (!pronto) return
+    const t = gerarTreino({
+      ...cfg, formato: m.formato, modelo: m, semente: Math.floor(Math.random() * 1e9), evitar: [],
+      foco: cfg.foco === 'auto' ? 'full' : cfg.foco,
+      organizacao: cfg.organizacao === 'auto' ? (m.dupla ? 'duplas' : 'individual') : cfg.organizacao,
+    })
+    setTreino(t); guardar(cfg, recentes, historico)
   }
 
   async function copiar() {
@@ -171,32 +186,33 @@ export default function TreinoPolo({ poloId, poloNome }) {
           ))}
         </div>
 
+        <div className={`rounded-xl border p-3 space-y-4 ${pronto ? 'border-slate-200 dark:border-navy-600' : 'border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-900/10'}`}>
+          <div>
+            <Rotulo>Nível da turma <span className="text-amber-600 dark:text-amber-400 font-normal">· marque sempre</span></Rotulo>
+            <Opcoes valor={cfg.nivel} onChange={v => set('nivel', v)} opcoes={[['i', 'Intermediário'], ['a', 'Avançado']]} />
+          </div>
+          <div>
+            <Rotulo>Quantos alunos hoje <span className="text-amber-600 dark:text-amber-400 font-normal">· marque sempre</span></Rotulo>
+            <Opcoes valor={cfg.alunos} onChange={v => set('alunos', v)} opcoes={[2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => [n, String(n)])} />
+          </div>
+        </div>
+
         {modo === 'auto' && (<>
         <div><Rotulo>Formato</Rotulo>
           <Opcoes valor={cfg.formato} onChange={v => set('formato', v)}
-            opcoes={Object.entries(FORMATOS).filter(([k]) => k !== 'escadaria' || cfg.recursos.includes('escada')).map(([k, v]) => [k, v.label])} />
-          <p className="text-sm text-slate-400 mt-2">{FORMATOS[cfg.formato].desc}</p>
+            opcoes={[['auto', '✨ Automático'], ...Object.entries(FORMATOS).filter(([k]) => k !== 'escadaria' || cfg.recursos.includes('escada')).map(([k, v]) => [k, v.label])]} />
+          <p className="text-sm text-slate-400 mt-2">{cfg.formato === 'auto' ? 'O sistema escolhe o formato e varia a rotina (não repete o mesmo seguido).' : FORMATOS[cfg.formato].desc}</p>
         </div>
 
         <div><Rotulo>Foco</Rotulo>
-          <Opcoes valor={cfg.foco} onChange={v => set('foco', v)} opcoes={Object.entries(FOCOS).map(([k, v]) => [k, v.label])} /></div>
-
-        <div><Rotulo>Nível da turma</Rotulo>
-          <Opcoes valor={cfg.nivel} onChange={v => set('nivel', v)} opcoes={[['i', 'Intermediário'], ['a', 'Avançado']]} /></div>
+          <Opcoes valor={cfg.foco} onChange={v => set('foco', v)} opcoes={[['auto', '✨ Automático'], ...Object.entries(FOCOS).map(([k, v]) => [k, v.label])]} /></div>
 
         </>)}
 
         <div><Rotulo>Como os alunos fazem</Rotulo>
-          <Opcoes valor={cfg.organizacao} onChange={v => set('organizacao', v)} opcoes={Object.entries(ORGANIZACOES)} /></div>
+          <Opcoes valor={cfg.organizacao} onChange={v => set('organizacao', v)} opcoes={[['auto', '✨ Automático'], ...Object.entries(ORGANIZACOES)]} /></div>
 
         <div className="flex flex-wrap items-end gap-5">
-          <div><Rotulo>Alunos hoje</Rotulo>
-            <div className="flex items-center gap-1">
-              <button type="button" onClick={() => set('alunos', Math.max(1, cfg.alunos - 1))} aria-label="Menos alunos" className="h-11 w-11 grid place-items-center rounded-xl border border-slate-200 dark:border-navy-600 text-slate-600 dark:text-slate-200"><Minus size={18} /></button>
-              <span className="w-12 text-center text-lg font-bold text-navy-900 dark:text-white">{cfg.alunos}</span>
-              <button type="button" onClick={() => set('alunos', Math.min(40, cfg.alunos + 1))} aria-label="Mais alunos" className="h-11 w-11 grid place-items-center rounded-xl bg-primary-500 text-primary-950"><Plus size={18} /></button>
-            </div>
-          </div>
           <div><Rotulo>Duração</Rotulo>
             <select value={cfg.duracao} onChange={e => set('duracao', Number(e.target.value))} className={inputCls}>
               {[30, 40, 50, 60].map(m => <option key={m} value={m}>{m} min</option>)}
@@ -222,13 +238,15 @@ export default function TreinoPolo({ poloId, poloNome }) {
           Sem impacto (sem saltos nem corrida forte)
         </label>
 
-        {modo === 'auto' && <button onClick={gerar} className={`${btnPrimary} w-full`}><Shuffle size={18} /> {treino ? 'Gerar outro treino' : 'Gerar treino'}</button>}
+        {!pronto && <p className="text-sm text-amber-700 dark:text-amber-300">Marque o nível da turma e a quantidade de alunos para continuar.</p>}
+
+        {modo === 'auto' && <button onClick={gerar} disabled={!pronto} className={`${btnPrimary} w-full`}><Shuffle size={18} /> {treino ? 'Gerar outro treino' : 'Gerar treino'}</button>}
       </section>
 
       {/* ── Treino gerado ── */}
       <section className="space-y-3 min-w-0">
         {modo === 'prontos' && !treino?.config?.modeloId ? (
-          <ListaProntos recursos={cfg.recursos} ocultos={ocultos} onUsar={usarModelo} onApagar={apagarTreinos} onRestaurar={restaurarTreino} />
+          <ListaProntos recursos={cfg.recursos} ocultos={ocultos} pronto={pronto} onUsar={usarModelo} onApagar={apagarTreinos} onRestaurar={restaurarTreino} />
         ) : !treino ? (
           <div className={`${card} p-10 text-center`}>
             <p className="font-semibold text-navy-900 dark:text-white mb-1">Nenhum treino gerado ainda</p>
@@ -239,7 +257,8 @@ export default function TreinoPolo({ poloId, poloNome }) {
             <div className={`${card} p-5 flex flex-wrap items-center justify-between gap-3`}>
               <div className="min-w-0">
                 <h2 className="text-xl font-bold text-navy-900 dark:text-white leading-tight">{treino.titulo}</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">{FORMATOS[treino.config.formato].label} · {treino.config.duracao} min · {ORGANIZACOES[treino.config.organizacao]} · {treino.config.alunos} alunos</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">{FORMATOS[treino.config.formato].label} · {FOCOS[treino.config.foco]?.label} · {treino.config.duracao} min · {ORGANIZACOES[treino.config.organizacao]} · {treino.config.alunos} alunos</p>
+                {treino.automatico?.length > 0 && <p className="text-sm text-primary-600 dark:text-primary-400 mt-0.5">✨ O sistema escolheu: {treino.automatico.map(k => ({ formato: 'formato', foco: 'foco', organizacao: 'organização' })[k]).join(', ')}</p>}
               </div>
               <div className="flex gap-2 flex-wrap">
                 {treino.config.modeloId

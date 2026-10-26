@@ -328,3 +328,36 @@ function aplicarModelo(blocos, modelo, recursos) {
     regra: pr.regra ?? '', itens: paraItens(pr.itens), obs: [pr.obs, ...(modelo.trocas ?? []).filter(t => !recursos.includes(t.precisa)).map(t => `Sem ${t.precisa}: ${t.de} → ${t.para}.`)].filter(Boolean).join(' '),
   }
 }
+
+// Modo automático: quando formato, foco ou organização estão em "auto", o sistema escolhe.
+// Varia a rotina: prefere o que foi usado há MAIS tempo (historico[0] = o mais recente).
+export function resolverAutomatico(cfg, historico = []) {
+  const { alunos = 8, recursos = [], baixoImpacto = false } = cfg
+  const out = { formato: cfg.formato, foco: cfg.foco, organizacao: cfg.organizacao, automatico: [] }
+  const idade = (campo, valor) => { const i = historico.findIndex(h => h[campo] === valor); return i === -1 ? 99 : i }
+  const maisAntigo = (opcoes, campo) => {
+    const max = Math.max(...opcoes.map(o => idade(campo, o)))
+    const melhores = opcoes.filter(o => idade(campo, o) === max)
+    return melhores[Math.floor(Math.random() * melhores.length)]
+  }
+  if (cfg.foco === 'auto') { out.foco = maisAntigo(Object.keys(FOCOS), 'foco'); out.automatico.push('foco') }
+  if (cfg.formato === 'auto') {
+    const candidatos = Object.keys(FORMATOS).filter(k => k !== 'mobilidade' && (k !== 'escadaria' || recursos.includes('escada')))
+    const ultimaMob = historico.findIndex(h => h.formato === 'mobilidade')
+    // aula só de mobilidade: de vez em quando (mais frequente se for "sem impacto")
+    const sorteiaMob = baixoImpacto ? Math.random() < 0.3 : (Math.random() < 0.12 && (ultimaMob === -1 || ultimaMob > 5))
+    out.formato = sorteiaMob ? 'mobilidade' : maisAntigo(candidatos, 'formato')
+    out.automatico.push('formato')
+  }
+  if (cfg.organizacao === 'auto') {
+    const ultima = historico[0]?.organizacao
+    const pesos = [['individual', 5]]
+    if (alunos >= 4) pesos.push(['duplas', 4])
+    if (alunos >= 6) pesos.push(['trios', 2])
+    const ajustados = pesos.map(([k, p]) => [k, k === ultima ? Math.max(1, p - 3) : p])
+    let r = Math.random() * ajustados.reduce((t, [, p]) => t + p, 0)
+    out.organizacao = ajustados.find(([, p]) => (r -= p) < 0)?.[0] ?? 'individual'
+    out.automatico.push('organizacao')
+  }
+  return out
+}
