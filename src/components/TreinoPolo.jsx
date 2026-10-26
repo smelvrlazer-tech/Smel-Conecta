@@ -1,8 +1,10 @@
 // src/components/TreinoPolo.jsx
 // Aba "Treinos" do polo — gerador de treino funcional (piloto: Água Limpa, só admin).
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Shuffle, Copy, Minus, Plus, Repeat2, Trash2 } from 'lucide-react'
+import { Shuffle, Copy, Repeat2, Trash2, Save, FolderOpen, Search } from 'lucide-react'
 import Sheet from './ui/Sheet'
+import { supabase } from '../lib/supabase'
+import { localIso } from '../lib/semana'
 import ConfirmDialog from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 import { RECURSOS, RECURSOS_AGUA_LIMPA } from '../lib/treino/exercicios'
@@ -96,6 +98,70 @@ function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar
   )
 }
 
+const fmtData = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const norm = (t) => (t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+function ListaSalvos({ salvos, carregando, semTabela, erro, turmaNome, onAbrir, onApagar }) {
+  const [busca, setBusca] = useState('')
+  const [apagando, setApagando] = useState(null)
+  const lista = salvos.filter(sv => !busca.trim() || norm(sv.titulo + ' ' + (turmaNome(sv.turma_id) ?? '') + ' ' + (sv.observacao ?? '')).includes(norm(busca)))
+  if (semTabela) return (
+    <div className={`${card} p-8 text-center`}>
+      <p className="font-semibold text-navy-900 dark:text-white mb-1">Falta ativar o histórico no banco</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400">Rode o arquivo <b>1-criar-treinos-salvos.sql</b> (pasta supabase\treino) no Supabase e volte aqui.</p>
+    </div>
+  )
+  return (
+    <div className="space-y-3">
+      <div className={`${card} p-4`}>
+        <h2 className="text-lg font-bold text-navy-900 dark:text-white">Histórico de treinos</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Treinos que você salvou. Abra para usar de novo na aula — dá para trocar exercícios e atualizar.</p>
+        <div className="relative">
+          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar por nome, turma ou observação…" className={`${inputCls} w-full pl-11`} />
+        </div>
+      </div>
+      {erro && <div className="rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-4 text-sm">{erro}</div>}
+      {carregando ? <div className="py-10 text-center text-slate-400">Carregando…</div>
+        : lista.length === 0 ? <div className={`${card} p-8 text-center text-slate-500 dark:text-slate-400`}>{salvos.length ? 'Nenhum treino encontrado.' : 'Você ainda não salvou nenhum treino. Gere um e toque em "Salvar treino".'}</div>
+        : (
+          <ul className="grid gap-3 md:grid-cols-2">
+            {lista.map(sv => {
+              const c = sv.conteudo?.config ?? {}
+              const principal = sv.conteudo?.blocos?.find(b => b.id === 'principal')
+              return (
+                <li key={sv.id} className={`${card} p-4 flex flex-col gap-2`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-400">{fmtData(sv.data_aula)}{turmaNome(sv.turma_id) ? ` · ${turmaNome(sv.turma_id)}` : ''}</div>
+                      <div className="text-base font-bold text-navy-900 dark:text-white leading-snug break-words">{sv.titulo}</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">{FORMATOS[c.formato]?.label ?? '—'}{c.foco && FOCOS[c.foco] ? ` · ${FOCOS[c.foco].label}` : ''}{c.alunos ? ` · ${c.alunos} alunos` : ''}</div>
+                    </div>
+                  </div>
+                  {principal && (
+                    <ul className="text-sm text-slate-600 dark:text-slate-300 list-disc pl-5 space-y-0.5">
+                      {principal.itens.slice(0, 3).map((i, k) => <li key={k} className="break-words">{i.nome}</li>)}
+                      {principal.itens.length > 3 && <li className="text-slate-400 list-none -ml-5">+ {principal.itens.length - 3} exercícios</li>}
+                    </ul>
+                  )}
+                  {sv.observacao && <div className="text-sm text-slate-500 dark:text-slate-400 italic">"{sv.observacao}"</div>}
+                  <div className="grid grid-cols-[1fr_auto] gap-2 mt-1">
+                    <button onClick={() => onAbrir(sv)} className={`${btnPrimary} w-full`}><FolderOpen size={18} /> Abrir</button>
+                    <button onClick={() => setApagando(sv)} aria-label={`Excluir ${sv.titulo}`} className={`${btnGhost} px-4`}><Trash2 size={18} /></button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      <ConfirmDialog open={!!apagando} onClose={() => setApagando(null)} confirmLabel="Excluir"
+        title={`Excluir "${apagando?.titulo}"?`}
+        description="O treino salvo some do histórico e não dá para recuperar. (Os treinos prontos e o gerador não são afetados.)"
+        onConfirm={() => onApagar(apagando)} />
+    </div>
+  )
+}
+
 export default function TreinoPolo({ poloId, poloNome }) {
   const { showToast, toastEl } = useToast()
   const padrao = { formato: 'auto', foco: 'auto', nivel: null, alunos: null, organizacao: 'auto', duracao: 40, recursos: RECURSOS_AGUA_LIMPA, baixoImpacto: false }
@@ -105,7 +171,63 @@ export default function TreinoPolo({ poloId, poloNome }) {
   const [trocando, setTrocando] = useState(null) // { blocoId, idx }
   const [ocultos, setOcultos] = useState([])
   const [historico, setHistorico] = useState([])   // últimos treinos (formato/foco/organização), para o modo automático variar
-  const [modo, setModo] = useState('auto')    // 'auto' (gerar) | 'prontos' (treinos prontos)
+  const [modo, setModo] = useState('auto')    // 'auto' (gerar) | 'prontos' (treinos prontos) | 'historico' (salvos)
+
+  // treinos salvos (banco) — histórico por data/turma
+  const [salvos, setSalvos] = useState([])
+  const [carregandoSalvos, setCarregandoSalvos] = useState(false)
+  const [semTabela, setSemTabela] = useState(false)
+  const [erroSalvos, setErroSalvos] = useState('')
+  const [turmas, setTurmas] = useState([])
+  const [sheetSalvar, setSheetSalvar] = useState(false)
+  const [formSalvar, setFormSalvar] = useState({ data: localIso(), turmaId: '', obs: '' })
+  const [salvandoTreino, setSalvandoTreino] = useState(false)
+
+  const carregarSalvos = useCallback(async () => {
+    setCarregandoSalvos(true)
+    const { data, error } = await supabase.from('treinos_salvos').select('*').eq('polo_id', poloId)
+      .order('data_aula', { ascending: false }).order('criado_em', { ascending: false }).limit(300)
+    if (error) {
+      if (error.code === '42P01' || /treinos_salvos/.test(error.message ?? '')) setSemTabela(true)
+      else setErroSalvos('Não foi possível carregar o histórico agora. Tente de novo.')
+    } else { setSemTabela(false); setErroSalvos(''); setSalvos(data ?? []) }
+    setCarregandoSalvos(false)
+  }, [poloId])
+  useEffect(() => { carregarSalvos() }, [carregarSalvos])
+  useEffect(() => {
+    supabase.from('turmas').select('id,horario,dias,faixa,modalidades(nome)').eq('polo_id', poloId)
+      .then(({ data }) => setTurmas(data ?? []))
+  }, [poloId])
+  const rotuloTurma = (t) => `${t.modalidades?.nome ?? 'Turma'}${t.dias?.length ? ' · ' + t.dias.join('/') : ''}${t.horario ? ' ' + String(t.horario).slice(0, 5) : ''}`
+  const turmaNome = (id) => { const t = turmas.find(x => x.id === id); return t ? rotuloTurma(t) : null }
+
+  function abrirSalvar() {
+    setFormSalvar({ data: localIso(), turmaId: '', obs: '' })
+    setSheetSalvar(true)
+  }
+  async function salvarTreino(comoNovo) {
+    const { salvoId, ...limpo } = treino
+    setSalvandoTreino(true)
+    const campos = { titulo: limpo.titulo, conteudo: limpo }
+    let resp
+    if (salvoId && !comoNovo) resp = await supabase.from('treinos_salvos').update(campos).eq('id', salvoId).select().single()
+    else resp = await supabase.from('treinos_salvos').insert({
+      ...campos, polo_id: poloId, data_aula: formSalvar.data || localIso(), turma_id: formSalvar.turmaId || null, observacao: formSalvar.obs.trim() || null,
+    }).select().single()
+    setSalvandoTreino(false)
+    if (resp.error) {
+      if (resp.error.code === '42P01') setSemTabela(true)
+      return showToast(resp.error.code === '42501' ? 'Você não tem permissão para salvar treinos.' : 'Não foi possível salvar. Confira a internet e tente de novo.', 'error')
+    }
+    setTreino(t => ({ ...t, salvoId: resp.data.id }))
+    setSheetSalvar(false); showToast(salvoId && !comoNovo ? 'Treino atualizado no histórico.' : 'Treino salvo no histórico.', 'success'); carregarSalvos()
+  }
+  function abrirSalvo(sv) { setTreino({ ...sv.conteudo, salvoId: sv.id }) }
+  async function apagarSalvo(sv) {
+    const { error } = await supabase.from('treinos_salvos').delete().eq('id', sv.id)
+    if (error) return showToast('Não foi possível excluir.', 'error')
+    setSalvos(l => l.filter(x => x.id !== sv.id)); showToast('Treino excluído do histórico.', 'success')
+  }
 
   // lembra as últimas escolhas deste polo neste aparelho (e os exercícios usados, para variar)
   useEffect(() => {
@@ -179,13 +301,16 @@ export default function TreinoPolo({ poloId, poloNome }) {
           <p className="text-sm text-slate-500 dark:text-slate-400">{poloNome} · funcional</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-navy-700">
-          {[['auto', 'Gerar automático'], ['prontos', 'Treinos prontos']].map(([k, rot]) => (
+        <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-navy-700">
+          {[['auto', 'Gerar'], ['prontos', 'Prontos'], ['historico', `Histórico${salvos.length ? ` (${salvos.length})` : ''}`]].map(([k, rot]) => (
             <button key={k} type="button" onClick={() => { setModo(k); setTreino(null) }}
               className={`h-11 rounded-lg text-sm font-semibold ${modo === k ? 'bg-primary-500 text-primary-950' : 'text-slate-500 dark:text-slate-300'}`}>{rot}</button>
           ))}
         </div>
 
+        {modo === 'historico' && <p className="text-sm text-slate-500 dark:text-slate-400">Aqui ficam os treinos que você salvou, por data e turma. Abra um para usar de novo na aula.</p>}
+
+        {modo !== 'historico' && (<>
         <div className={`rounded-xl border p-3 space-y-4 ${pronto ? 'border-slate-200 dark:border-navy-600' : 'border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-900/10'}`}>
           <div>
             <Rotulo>Nível da turma <span className="text-amber-600 dark:text-amber-400 font-normal">· marque sempre</span></Rotulo>
@@ -241,11 +366,14 @@ export default function TreinoPolo({ poloId, poloNome }) {
         {!pronto && <p className="text-sm text-amber-700 dark:text-amber-300">Marque o nível da turma e a quantidade de alunos para continuar.</p>}
 
         {modo === 'auto' && <button onClick={gerar} disabled={!pronto} className={`${btnPrimary} w-full`}><Shuffle size={18} /> {treino ? 'Gerar outro treino' : 'Gerar treino'}</button>}
+        </>)}
       </section>
 
       {/* ── Treino gerado ── */}
       <section className="space-y-3 min-w-0">
-        {modo === 'prontos' && !treino?.config?.modeloId ? (
+        {modo === 'historico' && !treino ? (
+          <ListaSalvos salvos={salvos} carregando={carregandoSalvos} semTabela={semTabela} erro={erroSalvos} turmaNome={turmaNome} onAbrir={abrirSalvo} onApagar={apagarSalvo} />
+        ) : modo === 'prontos' && !treino?.config?.modeloId && !treino?.salvoId ? (
           <ListaProntos recursos={cfg.recursos} ocultos={ocultos} pronto={pronto} onUsar={usarModelo} onApagar={apagarTreinos} onRestaurar={restaurarTreino} />
         ) : !treino ? (
           <div className={`${card} p-10 text-center`}>
@@ -261,9 +389,12 @@ export default function TreinoPolo({ poloId, poloNome }) {
                 {treino.automatico?.length > 0 && <p className="text-sm text-primary-600 dark:text-primary-400 mt-0.5">✨ O sistema escolheu: {treino.automatico.map(k => ({ formato: 'formato', foco: 'foco', organizacao: 'organização' })[k]).join(', ')}</p>}
               </div>
               <div className="flex gap-2 flex-wrap">
-                {treino.config.modeloId
-                  ? <button onClick={() => setTreino(null)} className={btnGhost}>← Outros treinos</button>
-                  : <button onClick={gerar} className={btnGhost}><Shuffle size={16} /> Sortear de novo</button>}
+                {treino.salvoId
+                  ? <button onClick={() => { setTreino(null); setModo('historico') }} className={btnGhost}>← Histórico</button>
+                  : treino.config.modeloId
+                    ? <button onClick={() => setTreino(null)} className={btnGhost}>← Outros treinos</button>
+                    : <button onClick={gerar} className={btnGhost}><Shuffle size={16} /> Sortear de novo</button>}
+                <button onClick={abrirSalvar} className={btnGhost}><Save size={16} /> {treino.salvoId ? 'Atualizar salvo' : 'Salvar treino'}</button>
                 <button onClick={copiar} className={btnPrimary}><Copy size={16} /> Copiar para WhatsApp</button>
               </div>
             </div>
@@ -302,6 +433,31 @@ export default function TreinoPolo({ poloId, poloNome }) {
           </>
         )}
       </section>
+
+      {/* ── Salvar no histórico ── */}
+      <Sheet open={sheetSalvar} onClose={() => setSheetSalvar(false)} title={treino?.salvoId ? 'Atualizar treino salvo' : 'Salvar treino'} subtitle={treino?.titulo}
+        footer={<>
+          <button onClick={() => setSheetSalvar(false)} className={btnGhost}>Cancelar</button>
+          {treino?.salvoId && <button onClick={() => salvarTreino(true)} disabled={salvandoTreino} className={btnGhost}>Salvar como novo</button>}
+          <button onClick={() => salvarTreino(false)} disabled={salvandoTreino} className={btnPrimary}>{salvandoTreino ? 'Salvando…' : treino?.salvoId ? 'Atualizar' : 'Salvar'}</button>
+        </>}>
+        {treino?.salvoId && <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">"Atualizar" grava as trocas que você fez neste treino salvo. "Salvar como novo" cria outro registro com a data e turma abaixo.</p>}
+        <label className="block mb-4">
+          <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1.5">Data da aula</span>
+          <input type="date" value={formSalvar.data} onChange={e => setFormSalvar(f => ({ ...f, data: e.target.value }))} className={`${inputCls} w-full`} />
+        </label>
+        <label className="block mb-4">
+          <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1.5">Turma (opcional)</span>
+          <select value={formSalvar.turmaId} onChange={e => setFormSalvar(f => ({ ...f, turmaId: e.target.value }))} className={`${inputCls} w-full`}>
+            <option value="">Sem turma específica</option>
+            {turmas.map(t => <option key={t.id} value={t.id}>{rotuloTurma(t)}</option>)}
+          </select>
+        </label>
+        <label className="block mb-2">
+          <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1.5">Observação (opcional)</span>
+          <input value={formSalvar.obs} onChange={e => setFormSalvar(f => ({ ...f, obs: e.target.value }))} placeholder="Ex.: turma gostou, aumentar o tempo" className={`${inputCls} w-full`} />
+        </label>
+      </Sheet>
 
       {/* ── Trocar exercício ── */}
       <Sheet open={!!trocando} onClose={() => setTrocando(null)} title="Trocar exercício" subtitle={itemTrocando?.nome}
