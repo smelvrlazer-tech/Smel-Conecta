@@ -1,7 +1,7 @@
 // src/components/TreinoPolo.jsx
 // Aba "Treinos" do polo — gerador de treino funcional (piloto: Água Limpa, só admin).
-import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Shuffle, Copy, Repeat2, Trash2, Save, FolderOpen, Search } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { Shuffle, Copy, Repeat2, Trash2, Save, FolderOpen, Search, Undo2, Eraser } from 'lucide-react'
 import Sheet from './ui/Sheet'
 import { supabase } from '../lib/supabase'
 import { localIso } from '../lib/semana'
@@ -35,7 +35,30 @@ const Rotulo = ({ children }) => <div className="text-sm font-semibold text-slat
 
 const CHAVE = (poloId) => `smel_treino_${poloId}`
 
-function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar }) {
+function Volume({ valor, onSalvar }) {
+  const [editando, setEditando] = useState(false)
+  const [txt, setTxt] = useState('')
+  const cancelou = useRef(false)
+  if (!editando) {
+    return (
+      <button type="button" onClick={() => { cancelou.current = false; setTxt(valor ?? ''); setEditando(true) }}
+        aria-label="Mudar o volume deste exercício"
+        className={`inline-flex items-center h-9 px-3 rounded-full text-sm font-semibold border ${valor
+          ? 'border-slate-200 dark:border-navy-600 text-navy-900 dark:text-white bg-slate-50 dark:bg-navy-700'
+          : 'border-dashed border-slate-300 dark:border-navy-500 text-slate-400'}`}>
+        {valor || '+ volume'}
+      </button>
+    )
+  }
+  return (
+    <input autoFocus value={txt} onChange={e => setTxt(e.target.value)} placeholder="ex.: 15 reps, 40s, 3x12"
+      onBlur={() => { setEditando(false); if (!cancelou.current) onSalvar(txt.trim()) }}
+      onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { cancelou.current = true; e.target.blur() } }}
+      className="h-9 w-44 px-3 rounded-full border border-primary-500 bg-white dark:bg-navy-700 text-sm font-semibold text-navy-900 dark:text-white outline-none" />
+  )
+}
+
+function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar, onVoltar }) {
   const [tipo, setTipo] = useState('todos')
   const [apagando, setApagando] = useState(null)       // modelo a apagar, ou 'faltam'
   const visiveis = MODELOS.filter(m => !ocultos.includes(m.id))
@@ -46,6 +69,7 @@ function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar
   const semMaterial = visiveis.filter(m => faltaMaterial(m).length > 0)
   return (
     <div className="space-y-3">
+      {onVoltar && <button onClick={onVoltar} className={`${btnGhost} w-full sm:w-auto`}>← Voltar ao treino que está na tela</button>}
       <div className={`${card} p-4`}>
         <h2 className="text-lg font-bold text-navy-900 dark:text-white">Treinos prontos</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Seus treinos de exemplo. Toque em "Usar" e o sistema completa o que faltar (mobilidade, aquecimento, alongamento).</p>
@@ -101,7 +125,7 @@ function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar
 const fmtData = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 const norm = (t) => (t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
-function ListaSalvos({ salvos, carregando, semTabela, erro, turmaNome, onAbrir, onApagar }) {
+function ListaSalvos({ salvos, carregando, semTabela, erro, turmaNome, onAbrir, onApagar, onVoltar }) {
   const [busca, setBusca] = useState('')
   const [apagando, setApagando] = useState(null)
   const lista = salvos.filter(sv => !busca.trim() || norm(sv.titulo + ' ' + (turmaNome(sv.turma_id) ?? '') + ' ' + (sv.observacao ?? '')).includes(norm(busca)))
@@ -113,6 +137,7 @@ function ListaSalvos({ salvos, carregando, semTabela, erro, turmaNome, onAbrir, 
   )
   return (
     <div className="space-y-3">
+      {onVoltar && <button onClick={onVoltar} className={`${btnGhost} w-full sm:w-auto`}>← Voltar ao treino que está na tela</button>}
       <div className={`${card} p-4`}>
         <h2 className="text-lg font-bold text-navy-900 dark:text-white">Histórico de treinos</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Treinos que você salvou. Abra para usar de novo na aula — dá para trocar exercícios e atualizar.</p>
@@ -172,6 +197,10 @@ export default function TreinoPolo({ poloId, poloNome }) {
   const [ocultos, setOcultos] = useState([])
   const [historico, setHistorico] = useState([])   // últimos treinos (formato/foco/organização), para o modo automático variar
   const [modo, setModo] = useState('auto')    // 'auto' (gerar) | 'prontos' (treinos prontos) | 'historico' (salvos)
+  const [verLista, setVerLista] = useState(false) // true = está escolhendo na lista (Prontos/Histórico); o treino da tela continua guardado
+  const [pilha, setPilha] = useState([])          // versões anteriores do treino (para Desfazer)
+  const [limpando, setLimpando] = useState(false)
+  const [carregadoAtual, setCarregadoAtual] = useState(false)
 
   // treinos salvos (banco) — histórico por data/turma
   const [salvos, setSalvos] = useState([])
@@ -222,7 +251,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
     setTreino(t => ({ ...t, salvoId: resp.data.id }))
     setSheetSalvar(false); showToast(salvoId && !comoNovo ? 'Treino atualizado no histórico.' : 'Treino salvo no histórico.', 'success'); carregarSalvos()
   }
-  function abrirSalvo(sv) { setTreino({ ...sv.conteudo, salvoId: sv.id }) }
+  function abrirSalvo(sv) { setTreino({ ...sv.conteudo, salvoId: sv.id }); setPilha([]); setVerLista(false) }
   async function apagarSalvo(sv) {
     const { error } = await supabase.from('treinos_salvos').delete().eq('id', sv.id)
     if (error) return showToast('Não foi possível excluir.', 'error')
@@ -238,9 +267,23 @@ export default function TreinoPolo({ poloId, poloNome }) {
       if (Array.isArray(salvo?.historico)) setHistorico(salvo.historico)
       const oc = JSON.parse(localStorage.getItem(`smel_treino_ocultos_${poloId}`) || '[]')
       if (Array.isArray(oc)) setOcultos(oc)
+      // o treino que estava na tela volta como estava (some só ao gerar outro ou em "Limpar tela")
+      const atual = JSON.parse(localStorage.getItem(`smel_treino_atual_${poloId}`) || 'null')
+      if (atual?.treino?.blocos) { setTreino(atual.treino); if (atual.modo) setModo(atual.modo) }
     } catch { /* sem armazenamento: segue com o padrão */ }
+    setCarregadoAtual(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poloId])
+
+  // guarda o treino da tela a cada mudança
+  useEffect(() => {
+    if (!carregadoAtual) return
+    try {
+      const k = `smel_treino_atual_${poloId}`
+      if (treino) localStorage.setItem(k, JSON.stringify({ treino, modo }))
+      else localStorage.removeItem(k)
+    } catch { /* ignora */ }
+  }, [treino, modo, poloId, carregadoAtual])
   const guardar = useCallback((c, r, h) => {
     try { localStorage.setItem(CHAVE(poloId), JSON.stringify({ cfg: c, recentes: r, historico: h })) } catch { /* ignora */ }
   }, [poloId])
@@ -257,6 +300,23 @@ export default function TreinoPolo({ poloId, poloNome }) {
   const set = (k, v) => setCfg(c => ({ ...c, [k]: v }))
   const alternarRecurso = (k) => setCfg(c => ({ ...c, recursos: c.recursos.includes(k) ? c.recursos.filter(x => x !== k) : [...c.recursos, k] }))
 
+  // ── editar o treino da tela: volume, remover, trocar, desfazer ──
+  const guardarDesfazer = () => setPilha(p => [...p.slice(-19), treino])
+  function desfazer() { if (!pilha.length) return; setTreino(pilha[pilha.length - 1]); setPilha(pilha.slice(0, -1)) }
+  function editarVolume(blocoId, idx, valor) {
+    const novo = valor || undefined
+    if (treino.blocos.find(b => b.id === blocoId)?.itens[idx]?.reps === novo) return
+    guardarDesfazer()
+    setTreino(t => ({ ...t, blocos: t.blocos.map(b => (b.id !== blocoId ? b : { ...b, itens: b.itens.map((it, i) => (i === idx ? { ...it, reps: novo } : it)) })) }))
+  }
+  function removerItem(blocoId, idx) {
+    guardarDesfazer()
+    setTreino(t => trocarItem(t, blocoId, idx, null))
+    showToast('Exercício removido. Se foi sem querer, toque em "Desfazer".', 'success')
+  }
+  function aplicarTroca(blocoId, idx, novo) { guardarDesfazer(); setTreino(t => trocarItem(t, blocoId, idx, novo)) }
+  function limparTela() { setTreino(null); setPilha([]); setVerLista(false) }
+
   function gerar() {
     if (!pronto) return
     // o que estiver em "Automático" é escolhido pelo sistema (variando a rotina)
@@ -264,7 +324,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
     const real = { ...cfg, formato: esc.formato, foco: esc.foco, organizacao: esc.organizacao }
     const t = gerarTreino({ ...real, semente: Math.floor(Math.random() * 1e9), evitar: recentes })
     t.automatico = esc.automatico
-    setTreino(t)
+    setTreino(t); setPilha([]); setVerLista(false)
     const usados = t.blocos.find(b => b.id === 'principal').itens.map(i => i.nome)
     const novosRecentes = [...usados, ...recentes].slice(0, 30)
     const novoHistorico = [{ formato: real.formato, foco: real.foco, organizacao: real.organizacao }, ...historico].slice(0, 8)
@@ -278,7 +338,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
       foco: cfg.foco === 'auto' ? 'full' : cfg.foco,
       organizacao: cfg.organizacao === 'auto' ? (m.dupla ? 'duplas' : 'individual') : cfg.organizacao,
     })
-    setTreino(t); guardar(cfg, recentes, historico)
+    setTreino(t); setPilha([]); setVerLista(false); guardar(cfg, recentes, historico)
   }
 
   async function copiar() {
@@ -303,7 +363,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
 
         <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-100 dark:bg-navy-700">
           {[['auto', 'Gerar'], ['prontos', 'Prontos'], ['historico', `Histórico${salvos.length ? ` (${salvos.length})` : ''}`]].map(([k, rot]) => (
-            <button key={k} type="button" onClick={() => { setModo(k); setTreino(null) }}
+            <button key={k} type="button" onClick={() => { setModo(k); setVerLista(k !== 'auto') }}
               className={`h-11 rounded-lg text-sm font-semibold ${modo === k ? 'bg-primary-500 text-primary-950' : 'text-slate-500 dark:text-slate-300'}`}>{rot}</button>
           ))}
         </div>
@@ -371,10 +431,10 @@ export default function TreinoPolo({ poloId, poloNome }) {
 
       {/* ── Treino gerado ── */}
       <section className="space-y-3 min-w-0">
-        {modo === 'historico' && !treino ? (
-          <ListaSalvos salvos={salvos} carregando={carregandoSalvos} semTabela={semTabela} erro={erroSalvos} turmaNome={turmaNome} onAbrir={abrirSalvo} onApagar={apagarSalvo} />
-        ) : modo === 'prontos' && !treino?.config?.modeloId && !treino?.salvoId ? (
-          <ListaProntos recursos={cfg.recursos} ocultos={ocultos} pronto={pronto} onUsar={usarModelo} onApagar={apagarTreinos} onRestaurar={restaurarTreino} />
+        {verLista && modo === 'historico' ? (
+          <ListaSalvos salvos={salvos} carregando={carregandoSalvos} semTabela={semTabela} erro={erroSalvos} turmaNome={turmaNome} onAbrir={abrirSalvo} onApagar={apagarSalvo} onVoltar={treino ? () => setVerLista(false) : null} />
+        ) : verLista && modo === 'prontos' ? (
+          <ListaProntos recursos={cfg.recursos} ocultos={ocultos} pronto={pronto} onUsar={usarModelo} onApagar={apagarTreinos} onRestaurar={restaurarTreino} onVoltar={treino ? () => setVerLista(false) : null} />
         ) : !treino ? (
           <div className={`${card} p-10 text-center`}>
             <p className="font-semibold text-navy-900 dark:text-white mb-1">Nenhum treino gerado ainda</p>
@@ -390,11 +450,13 @@ export default function TreinoPolo({ poloId, poloNome }) {
               </div>
               <div className="flex gap-2 flex-wrap">
                 {treino.salvoId
-                  ? <button onClick={() => { setTreino(null); setModo('historico') }} className={btnGhost}>← Histórico</button>
+                  ? <button onClick={() => { setModo('historico'); setVerLista(true) }} className={btnGhost}>← Histórico</button>
                   : treino.config.modeloId
-                    ? <button onClick={() => setTreino(null)} className={btnGhost}>← Outros treinos</button>
+                    ? <button onClick={() => { setModo('prontos'); setVerLista(true) }} className={btnGhost}>← Outros treinos</button>
                     : <button onClick={gerar} className={btnGhost}><Shuffle size={16} /> Sortear de novo</button>}
                 <button onClick={abrirSalvar} className={btnGhost}><Save size={16} /> {treino.salvoId ? 'Atualizar salvo' : 'Salvar treino'}</button>
+                {pilha.length > 0 && <button onClick={desfazer} className={btnGhost}><Undo2 size={16} /> Desfazer</button>}
+                <button onClick={() => setLimpando(true)} className={btnGhost}><Eraser size={16} /> Limpar tela</button>
                 <button onClick={copiar} className={btnPrimary}><Copy size={16} /> Copiar para WhatsApp</button>
               </div>
             </div>
@@ -415,17 +477,20 @@ export default function TreinoPolo({ poloId, poloNome }) {
                       <div className="flex-1 min-w-0">
                         <div className="text-base font-semibold text-navy-900 dark:text-white leading-snug break-words">
                           {it.prefixo && <span className="text-primary-600 dark:text-primary-400">{it.prefixo} · </span>}{it.nome}
-                          {it.reps && <span className="text-slate-500 dark:text-slate-400 font-medium"> — {it.reps}</span>}
                           {it.dupla && <span className="ml-2 text-xs align-middle px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">dupla</span>}
                         </div>
                         {it.det && <div className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{it.det}</div>}
+                        <div className="mt-1.5"><Volume valor={it.reps} onSalvar={v => editarVolume(b.id, i, v)} /></div>
                       </div>
                       {it.slots && (
                         <button onClick={() => setTrocando({ blocoId: b.id, idx: i })} aria-label={`Trocar ${it.nome}`}
                           className="h-10 w-10 flex-shrink-0 grid place-items-center rounded-xl text-slate-400 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-navy-700"><Repeat2 size={18} /></button>
                       )}
+                      <button onClick={() => removerItem(b.id, i)} aria-label={`Remover ${it.nome}`}
+                        className="h-10 w-10 flex-shrink-0 grid place-items-center rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"><Trash2 size={18} /></button>
                     </li>
                   ))}
+                  {b.itens.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Nenhum exercício neste bloco (todos foram removidos).</li>}
                 </ol>
                 {b.obs && <div className="px-5 py-3 border-t border-slate-100 dark:border-navy-700 text-sm text-amber-700 dark:text-amber-300 bg-amber-50/60 dark:bg-amber-900/10">⚠️ {b.obs}</div>}
               </div>
@@ -433,6 +498,11 @@ export default function TreinoPolo({ poloId, poloNome }) {
           </>
         )}
       </section>
+
+      <ConfirmDialog open={limpando} onClose={() => setLimpando(false)} confirmLabel="Limpar tela"
+        title="Limpar a tela?"
+        description={treino?.salvoId ? 'O treino sai da tela. Ele continua salvo no Histórico.' : 'O treino sai da tela e não dá para recuperar. Se quiser guardar, toque em "Salvar treino" antes.'}
+        onConfirm={limparTela} />
 
       {/* ── Salvar no histórico ── */}
       <Sheet open={sheetSalvar} onClose={() => setSheetSalvar(false)} title={treino?.salvoId ? 'Atualizar treino salvo' : 'Salvar treino'} subtitle={treino?.titulo}
@@ -461,7 +531,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
 
       {/* ── Trocar exercício ── */}
       <Sheet open={!!trocando} onClose={() => setTrocando(null)} title="Trocar exercício" subtitle={itemTrocando?.nome}
-        footer={<button onClick={() => { setTreino(t => trocarItem(t, trocando.blocoId, trocando.idx, null)); setTrocando(null) }}
+        footer={<button onClick={() => { aplicarTroca(trocando.blocoId, trocando.idx, null); setTrocando(null) }}
           className={`${btnGhost} text-red-600 dark:text-red-400`}><Trash2 size={16} /> Remover do treino</button>}>
         {alternativas.length === 0 ? (
           <p className="py-4 text-slate-500">Não há outro exercício compatível com o material de hoje.</p>
@@ -469,7 +539,7 @@ export default function TreinoPolo({ poloId, poloNome }) {
           <ul className="divide-y divide-slate-100 dark:divide-navy-700">
             {alternativas.map(a => (
               <li key={a.nome}>
-                <button onClick={() => { setTreino(t => trocarItem(t, trocando.blocoId, trocando.idx, a)); setTrocando(null) }}
+                <button onClick={() => { aplicarTroca(trocando.blocoId, trocando.idx, a); setTrocando(null) }}
                   className="w-full text-left py-3 hover:bg-slate-50 dark:hover:bg-navy-700/40 rounded-lg px-2">
                   <div className="font-semibold text-navy-900 dark:text-white">{a.nome}</div>
                   {a.det && <div className="text-sm text-slate-500 dark:text-slate-400">{a.det}</div>}

@@ -137,7 +137,7 @@ export function gerarTreino(cfg) {
     blocos.push({
       id: 'mobilidade', titulo: 'Mobilidade', minutos: mob,
       regra: `${sel.length} movimentos · ${porExercicio}s cada · ${Math.max(1, Math.round((mob * 60) / (sel.length * porExercicio)))} volta(s)`,
-      itens: sel.map(e => item(e)),
+      itens: sel.map(e => item(e, { reps: `${porExercicio}s` })),
     })
   }
 
@@ -245,7 +245,7 @@ export function gerarTreino(cfg) {
     const voltas = 2
     const seg = Math.max(30, Math.round((principalMin * 60) / (todos.length * voltas) / 5) * 5)
     principal.regra = `Fluxo contínuo · ${todos.length} posições · ${seg}s cada · ${voltas} voltas · movimentos lentos e controlados`
-    principal.itens = todos
+    principal.itens = todos.map(i => ({ ...i, reps: `${seg}s` }))
     principal.obs = 'Sem impacto: respire fundo e respeite o limite de cada articulação.'
   } else { // livre
     const n = principalMin >= 20 ? 7 : 6
@@ -259,7 +259,7 @@ export function gerarTreino(cfg) {
   // 4) Alongamento / volta à calma
   {
     const sel = embaralhar(rand, pool(ALONGAMENTO)).slice(0, calma >= 4 ? 5 : 4)
-    blocos.push({ id: 'calma', titulo: 'Volta à calma', minutos: calma, regra: `${sel.length} alongamentos · 30 a 40s cada`, itens: sel.map(e => item(e)) })
+    blocos.push({ id: 'calma', titulo: 'Volta à calma', minutos: calma, regra: `${sel.length} alongamentos · 30 a 40s cada`, itens: sel.map(e => item(e, { reps: '35s' })) })
   }
 
   return {
@@ -274,6 +274,7 @@ export function textoWhatsApp(t) {
   const c = t.config
   const linhas = [`*${t.titulo}*`, `${FORMATOS[c.formato].label} · ${c.duracao} min · ${ORGANIZACOES[c.organizacao]}`, '']
   for (const b of t.blocos) {
+    if (!b.itens.length) continue
     linhas.push(`*${b.titulo.toUpperCase()}* (${b.minutos} min)`)
     if (b.regra) linhas.push(`_${b.regra}_`)
     b.itens.forEach((i, k) => linhas.push(`${i.prefixo ? i.prefixo + ': ' : `${k + 1}. `}${i.nome}${i.reps ? ` — ${i.reps}` : ''}`))
