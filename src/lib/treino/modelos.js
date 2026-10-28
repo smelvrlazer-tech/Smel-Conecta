@@ -13,7 +13,7 @@ const WOD = (titulo, regra, itens, extra = {}) => ({ titulo, regra, itens, ...ex
 const TROCA_DU = { de: 'Double Unders (DU)', para: 'Polichinelo (2 por Double Under)', precisa: 'corda' }
 const TROCA_THRUSTER = { de: 'Thruster (mochila com pesos)', para: 'Thruster com bastão (agacha e empurra o bastão acima da cabeça)', precisa: 'mochila' }
 
-export const MODELOS = [
+const MODELOS_BASE = [
   // ───────────── COMPLETOS (mobilidade + aquecimento + principal) ─────────────
   {
     id: 'd1', dia: 1, nome: 'The Arena', foco: 'Pernas e core', tipo: 'completo', formato: 'circuito', recursos: ['quadra', 'arquibancada'],
@@ -121,7 +121,48 @@ export const MODELOS = [
     principal: WOD('Treino · 3 partes', 'Parte 1: 10 man makers · Parte 2: 2 rounds · Parte 3: 5 rounds',
       ['Parte 1: 10 man makers (burpee + flexão + remada unilateral + thruster)', 'Parte 2 (2 rounds): 10 afundos overhead', 'Parte 2: 15 flexões', 'Parte 2: 30 skippings', 'Parte 3 (5 rounds): 3 idas e voltas na quadra', 'Parte 3: 30 agachamentos', 'Parte 3: 15 burpees'], { minutos: 25 }),
   },
+  // ───────────── NOVOS — EM DUPLAS ─────────────
+  { id: 'n1', dia: null, nome: 'Sincronia', foco: 'Pernas e core', formato: 'circuito', recursos: ['colchonete', 'bastao'], org: 'duplas', focos: ['pernas', 'core'],
+    principal: WOD('Treino · Duplas', '5 rounds · 40s faz / 20s troca · um de cada vez ("I go, you go")', ['Agachamento com bastão entre os dois', 'Prancha com toque de mão (high-five)', 'Abdominal em dupla (pés apoiados)', 'Afundo reverso sincronizado', 'Passe de bastão em rotação russa'], { minutos: 22, obs: 'Enquanto um faz, o outro descansa e conta.' }) },
+  { id: 'n2', dia: null, nome: 'Duelo de Duplas', foco: 'Corpo todo', formato: 'fortime', recursos: ['quadra'], org: 'duplas', focos: ['full', 'cardio'],
+    principal: WOD('Treino · For time em duplas', '3 rounds for time · limite 22 min', ['Sprint ida e volta (um corre, o outro faz 10 agachamentos)', '30 polichinelos (dividem as reps)', 'Sprint ida e volta (trocam os papéis)', '20 afundos (dividem as reps)', '10 burpees cada um'], { minutos: 22 }) },
+  { id: 'n3', dia: null, nome: 'Tabata em Dupla', foco: 'Core e cardio', formato: 'tabata', recursos: ['colchonete'], org: 'duplas', focos: ['core', 'cardio'],
+    principal: WOD('Treino · Tabata em dupla', '3 tabatas · 20s faz / 10s descansa · 1 min de pausa · a dupla alterna a cada série', ['Tabata 1: agachamento com salto / prancha (um faz, o outro segura a prancha)', 'Tabata 2: abdominal em dupla (pés apoiados) / prancha com high-five', 'Tabata 3: afundo reverso sincronizado / cadeira humana'], { minutos: 15 }) },
+  { id: 'n4', dia: null, nome: 'EMOM em Dupla', foco: 'Pernas e cardio', formato: 'emom', recursos: ['arquibancada', 'quadra'], org: 'duplas', focos: ['pernas', 'cardio'],
+    principal: WOD('Treino · EMOM em dupla', 'EMOM 15 min · a cada minuto um exercício; um trabalha enquanto o outro descansa e trocam', ['Minuto 1: 15 step-ups na arquibancada (o outro faz cadeirinha na parede)', 'Minuto 2: troca de papéis', 'Minuto 3: sprint ida e volta juntos'], { minutos: 15 }) },
+  { id: 'n5', dia: null, nome: 'Escadaria em Duplas', foco: 'Pernas e cardio', formato: 'escadaria', recursos: ['escada'], org: 'duplas', focos: ['pernas', 'cardio'],
+    principal: WOD('Treino · Escadaria em duplas', '5 rounds · 40s faz / 20s troca · um sobe, o outro faz o exercício de espera', ['Subida com agachamento em cada degrau (o outro faz prancha)', 'Subida de 2 em 2 degraus (o outro faz agachamento isométrico)', 'Saltos de dois pés degrau a degrau', 'Flexão inclinada no degrau (o outro conta)', 'Subida correndo (revezamento)'], { minutos: 22 }) },
+  { id: 'n6', dia: null, nome: 'AMRAP em Dupla', foco: 'Corpo todo', formato: 'amrap', recursos: ['colchonete'], org: 'duplas', focos: ['full', 'core'],
+    principal: WOD('Treino · AMRAP em dupla', 'AMRAP 18 min · rounds compartilhados pela dupla', ['10 flexões cada um', '20 agachamentos (dividem as reps)', '30s de prancha com high-five', '10 abdominais remador cada um'], { minutos: 18 }) },
+
+  // ───────────── NOVOS — EM TRIOS ─────────────
+  { id: 't1', dia: null, nome: 'Trio Rodízio', foco: 'Corpo todo', formato: 'circuito', recursos: ['colchonete'], org: 'trios', focos: ['full', 'core'],
+    principal: WOD('Treino · Trios', '3 estações · 60s em cada · gira até cada aluno passar 4 vezes por cada estação', ['Estação 1: burpee', 'Estação 2: prancha com toque no ombro', 'Estação 3: afundo alternado (avanço)'], { minutos: 22, obs: 'Cada aluno em uma estação; ao sinal, todos giram.' }) },
+  { id: 't2', dia: null, nome: 'Estações em Trio', foco: 'Pernas e core', formato: 'estacoes', recursos: ['quadra', 'colchonete'], org: 'trios', focos: ['pernas', 'core'],
+    principal: WOD('Treino · 6 estações', '2 voltas · 90s em cada estação + 20s de troca · um trio por estação', ['Estação 1: agachamento com salto', 'Estação 2: abdominal remador', 'Estação 3: sprint ida e volta', 'Estação 4: afundo alternado', 'Estação 5: prancha lateral (30s cada lado)', 'Estação 6: polichinelo'], { minutos: 22 }) },
+  { id: 't3', dia: null, nome: 'For Time em Trio', foco: 'Corpo todo', formato: 'fortime', recursos: ['quadra'], org: 'trios', focos: ['full', 'cardio'],
+    principal: WOD('Treino · For time em trio', '3 rounds for time · os três dividem as repetições · limite 22 min', ['30 agachamentos', '30 abdominais supra', '15 burpees', '3 sprints (cada um corre 1)', '30 polichinelos'], { minutos: 22 }) },
+  { id: 't4', dia: null, nome: 'EMOM em Trio', foco: 'Core e corpo todo', formato: 'emom', recursos: ['colchonete'], org: 'trios', focos: ['core', 'full'],
+    principal: WOD('Treino · EMOM em trio', 'EMOM 18 min · ciclos de 3 min; cada aluno faz o exercício do seu minuto', ['Minuto 1: 15 agachamentos com salto', 'Minuto 2: 40s de prancha', 'Minuto 3: 15 abdominais bicicleta em pé'], { minutos: 18 }) },
+  { id: 't5', dia: null, nome: 'Tabata em Trio', foco: 'Cardio e pernas', formato: 'tabata', recursos: [], org: 'trios', focos: ['cardio', 'pernas'],
+    principal: WOD('Treino · Tabata em trio', '3 tabatas · 8 séries de 20s · o trio se reveza a cada série (A, B, C…)', ['Tabata 1: agachamento com salto', 'Tabata 2: mountain climber', 'Tabata 3: skater jumps'], { minutos: 15 }) },
+  { id: 't6', dia: null, nome: 'Escadaria em Trio', foco: 'Pernas e cardio', formato: 'escadaria', recursos: ['escada'], org: 'trios', focos: ['pernas', 'cardio'],
+    principal: WOD('Treino · Escadaria em trio', '4 rounds · 40s faz / 20s troca · o trio sobe em fila, um exercício por vez', ['Subida correndo na escada', 'Subida com agachamento em cada degrau', 'Subida lateral (passo a passo)', 'Subida com joelhada', 'Flexão inclinada no degrau'], { minutos: 22 }) },
 ]
+
+// ── Metadados para os filtros: como fazem (individual/duplas/trios) e foco ──
+const ORG_POR_ID = { d5: 'duplas', d7: 'duplas' }
+const FOCOS_POR_ID = {
+  d1: ['pernas', 'core'], d2: ['cardio', 'pernas'], d3: ['agilidade', 'cardio'], d4: ['pernas', 'core'], d5: ['pernas', 'core'],
+  d6: ['full', 'cardio'], d7: ['full', 'cardio'], d8: ['full'], d9: ['core', 'agilidade'], d10: ['full', 'core'], d11: ['full', 'pernas'],
+  d12: ['pernas', 'cardio'], d13: ['full'], d14: ['full', 'cardio'], d15: ['core'], d16: ['cardio', 'core'], d17: ['full'], d18: ['cardio'],
+  d19: ['full'], d20: ['superiores', 'pernas'], d21: ['full'], d22: ['superiores', 'full'], d23: ['core'], d24: ['cardio', 'core'],
+  d25: ['full'], d26: ['pernas', 'cardio'], d27: ['cardio', 'core'], d28: ['full'], d29: ['full'], d30: ['pernas', 'cardio'],
+  d31: ['pernas'], d32: ['core'], d33: ['core'], d34: ['full'],
+}
+// Todos os treinos são tratados como COMPLETOS: o que faltava (mobilidade, aquecimento, alongamento)
+// é preenchido sempre do mesmo jeito para cada treino (semente fixa por treino) na hora de usar.
+export const MODELOS = MODELOS_BASE.map(m => ({ ...m, org: m.org ?? ORG_POR_ID[m.id] ?? 'individual', focos: m.focos ?? FOCOS_POR_ID[m.id] ?? ['full'] }))
 
 export const TIPOS_MODELO = {
   completo: { label: 'Completo', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', dica: 'Veio com mobilidade, aquecimento e treino.' },

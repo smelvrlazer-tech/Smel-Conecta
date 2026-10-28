@@ -263,7 +263,7 @@ export function gerarTreino(cfg) {
   }
 
   return {
-    titulo: modelo ? `Dia ${modelo.dia} · ${modelo.nome}` : `${sortear(rand, NOMES[foco] ?? ['TREINO'])} — ${FOCOS[foco].label}`,
+    titulo: modelo ? (modelo.dia ? `Dia ${modelo.dia} · ${modelo.nome}` : modelo.nome) : `${sortear(rand, NOMES[foco] ?? ['TREINO'])} — ${FOCOS[foco].label}`,
     config: { formato, foco, nivel, alunos, organizacao, duracao, recursos, semente, baixoImpacto, modeloId: modelo?.id ?? null },
     blocos,
   }

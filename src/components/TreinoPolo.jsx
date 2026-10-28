@@ -8,7 +8,7 @@ import { localIso } from '../lib/semana'
 import ConfirmDialog from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 import { RECURSOS, RECURSOS_AGUA_LIMPA } from '../lib/treino/exercicios'
-import { MODELOS, TIPOS_MODELO } from '../lib/treino/modelos'
+import { MODELOS } from '../lib/treino/modelos'
 import {
   FORMATOS, FOCOS, ORGANIZACOES, gerarTreino, textoWhatsApp, alternativasPara, trocarItem, resolverAutomatico,
 } from '../lib/treino/gerador'
@@ -58,47 +58,76 @@ function Volume({ valor, onSalvar }) {
   )
 }
 
+const ORG_ROTULO = { individual: 'Individual', duplas: 'Coletivo · Duplas', trios: 'Coletivo · Trios' }
+
 function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar, onVoltar }) {
-  const [tipo, setTipo] = useState('todos')
+  const [fFormato, setFFormato] = useState('todos')
+  const [fOrg, setFOrg] = useState('todos')
+  const [fFoco, setFFoco] = useState('todos')
+  const [verApagados, setVerApagados] = useState(false)
   const [apagando, setApagando] = useState(null)       // modelo a apagar, ou 'faltam'
   const visiveis = MODELOS.filter(m => !ocultos.includes(m.id))
   const apagados = MODELOS.filter(m => ocultos.includes(m.id))
-  const lista = tipo === 'apagados' ? apagados : visiveis.filter(m => tipo === 'todos' || m.tipo === tipo)
-  const contagem = (t) => visiveis.filter(m => m.tipo === t).length
+  const passa = (m, f = {}) => {
+    const fo = f.formato ?? fFormato, or = f.org ?? fOrg, fc = f.foco ?? fFoco
+    return (fo === 'todos' || m.formato === fo) && (or === 'todos' || m.org === or) && (fc === 'todos' || m.focos.includes(fc))
+  }
+  const lista = verApagados ? apagados : visiveis.filter(m => passa(m))
+  const formatosUsados = [...new Set(MODELOS.map(m => m.formato))].filter(f => FORMATOS[f])
+  // número de treinos de cada chip, respeitando os OUTROS filtros
+  const nFormato = (f) => visiveis.filter(m => passa(m, { formato: f })).length
+  const nOrg = (o) => visiveis.filter(m => passa(m, { org: o })).length
+  const nFoco = (f) => visiveis.filter(m => passa(m, { foco: f })).length
   const faltaMaterial = (m) => m.recursos.filter(r => !recursos.includes(r) && !(m.trocas ?? []).some(t => t.precisa === r))
   const semMaterial = visiveis.filter(m => faltaMaterial(m).length > 0)
+  const limpar = () => { setFFormato('todos'); setFOrg('todos'); setFFoco('todos') }
+  const filtrando = fFormato !== 'todos' || fOrg !== 'todos' || fFoco !== 'todos'
   return (
     <div className="space-y-3">
       {onVoltar && <button onClick={onVoltar} className={`${btnGhost} w-full sm:w-auto`}>← Voltar ao treino que está na tela</button>}
-      <div className={`${card} p-4`}>
-        <h2 className="text-lg font-bold text-navy-900 dark:text-white">Treinos prontos</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">Seus treinos de exemplo. Toque em "Usar" e o sistema completa o que faltar (mobilidade, aquecimento, alongamento).</p>
-        <Opcoes valor={tipo} onChange={setTipo}
-          opcoes={[['todos', `Todos (${visiveis.length})`], ...Object.entries(TIPOS_MODELO).map(([k, v]) => [k, `${v.label} (${contagem(k)})`]), ...(apagados.length ? [['apagados', `Apagados (${apagados.length})`]] : [])]} />
-        {tipo !== 'apagados' && semMaterial.length > 0 && (
-          <button onClick={() => setApagando('faltam')} className={`${btnGhost} mt-3 w-full sm:w-auto`}>Apagar os {semMaterial.length} que precisam de material que o polo não tem</button>
+      <div className={`${card} p-4 space-y-4`}>
+        <div>
+          <h2 className="text-lg font-bold text-navy-900 dark:text-white">Treinos prontos</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Todos vêm completos: mobilidade, aquecimento, treino e alongamento. Toque em "Usar este treino".</p>
+        </div>
+        {verApagados ? (
+          <button onClick={() => setVerApagados(false)} className={btnGhost}>← Voltar à lista</button>
+        ) : (
+          <>
+            <div><Rotulo>Formato do treino</Rotulo>
+              <Opcoes valor={fFormato} onChange={setFFormato}
+                opcoes={[['todos', `Todos (${visiveis.length})`], ...formatosUsados.map(f => [f, `${FORMATOS[f].label} (${nFormato(f)})`])]} /></div>
+            <div><Rotulo>Como os alunos fazem</Rotulo>
+              <Opcoes valor={fOrg} onChange={setFOrg}
+                opcoes={[['todos', 'Todos'], ...Object.entries(ORG_ROTULO).map(([k, v]) => [k, `${v} (${nOrg(k)})`])]} /></div>
+            <div><Rotulo>Foco</Rotulo>
+              <Opcoes valor={fFoco} onChange={setFFoco}
+                opcoes={[['todos', 'Todos'], ...Object.entries(FOCOS).map(([k, v]) => [k, `${v.label} (${nFoco(k)})`])]} /></div>
+            <div className="flex flex-wrap gap-2">
+              {filtrando && <button onClick={limpar} className={btnGhost}>Limpar filtros</button>}
+              {semMaterial.length > 0 && <button onClick={() => setApagando('faltam')} className={btnGhost}>Apagar os {semMaterial.length} que precisam de material que o polo não tem</button>}
+              {apagados.length > 0 && <button onClick={() => setVerApagados(true)} className={btnGhost}>Ver apagados ({apagados.length})</button>}
+            </div>
+          </>
         )}
       </div>
+      <p className="text-sm text-slate-500 dark:text-slate-400 px-1">{lista.length} {lista.length === 1 ? 'treino' : 'treinos'}</p>
       <ul className="grid gap-3 md:grid-cols-2">
         {lista.map(m => {
           const faltam = faltaMaterial(m)
-          const tp = TIPOS_MODELO[m.tipo]
           return (
             <li key={m.id} className={`${card} p-4 flex flex-col gap-2`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-400">Dia {m.dia}</div>
-                  <div className="text-base font-bold text-navy-900 dark:text-white leading-snug">{m.nome}</div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400">{m.foco} · {FORMATOS[m.formato].label}{m.dupla ? ' · duplas' : ''}</div>
-                </div>
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${tp.cls}`} title={tp.dica}>{tp.label}</span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-400">{m.dia ? `Dia ${m.dia}` : 'Novo'}</div>
+                <div className="text-base font-bold text-navy-900 dark:text-white leading-snug">{m.nome}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">{FORMATOS[m.formato].label} · {m.focos.map(f => FOCOS[f]?.label).filter(Boolean).join(' + ')} · {ORG_ROTULO[m.org]}</div>
               </div>
               <ul className="text-sm text-slate-600 dark:text-slate-300 list-disc pl-5 space-y-0.5">
                 {m.principal.itens.slice(0, 4).map(i => <li key={typeof i === 'string' ? i : i.nome} className="break-words">{typeof i === 'string' ? i : i.nome}</li>)}
                 {m.principal.itens.length > 4 && <li className="text-slate-400 list-none -ml-5">+ {m.principal.itens.length - 4} exercícios</li>}
               </ul>
               {faltam.length > 0 && <div className="text-sm text-amber-700 dark:text-amber-300">⚠️ Precisa de: {faltam.map(r => RECURSOS[r] ?? r).join(', ')}</div>}
-              {tipo === 'apagados'
+              {verApagados
                 ? <button onClick={() => onRestaurar(m.id)} className={`${btnGhost} w-full mt-1`}>Restaurar este treino</button>
                 : (
                   <div className="grid grid-cols-[1fr_auto] gap-2 mt-1">
@@ -110,13 +139,13 @@ function ListaProntos({ recursos, ocultos, pronto, onUsar, onApagar, onRestaurar
           )
         })}
       </ul>
-      {lista.length === 0 && <div className={`${card} p-8 text-center text-slate-500 dark:text-slate-400`}>Nenhum treino nesta lista.</div>}
+      {lista.length === 0 && <div className={`${card} p-8 text-center text-slate-500 dark:text-slate-400`}>Nenhum treino com esses filtros.{filtrando && <> <button onClick={limpar} className="underline">Limpar filtros</button></>}</div>}
 
       <ConfirmDialog open={!!apagando} onClose={() => setApagando(null)} confirmLabel="Apagar"
         title={apagando === 'faltam' ? 'Apagar treinos sem material?' : `Apagar "${apagando?.nome}"?`}
         description={apagando === 'faltam'
-          ? `${semMaterial.length} treinos precisam de material que este polo não tem e saem da lista. Dá para restaurar depois em "Apagados".`
-          : 'O treino sai da lista deste polo. Dá para restaurar depois em "Apagados".'}
+          ? `${semMaterial.length} treinos precisam de material que este polo não tem e saem da lista. Dá para restaurar depois em "Ver apagados".`
+          : 'O treino sai da lista deste polo. Dá para restaurar depois em "Ver apagados".'}
         onConfirm={() => onApagar(apagando === 'faltam' ? semMaterial.map(m => m.id) : [apagando.id])} />
     </div>
   )
@@ -333,10 +362,11 @@ export default function TreinoPolo({ poloId, poloNome }) {
 
   function usarModelo(m) {
     if (!pronto) return
+    // semente fixa por treino: a mobilidade, o aquecimento e o alongamento que completam o treino são sempre os mesmos
+    const semente = [...m.id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7)
     const t = gerarTreino({
-      ...cfg, formato: m.formato, modelo: m, semente: Math.floor(Math.random() * 1e9), evitar: [],
-      foco: cfg.foco === 'auto' ? 'full' : cfg.foco,
-      organizacao: cfg.organizacao === 'auto' ? (m.dupla ? 'duplas' : 'individual') : cfg.organizacao,
+      ...cfg, formato: m.formato, modelo: m, semente, evitar: [],
+      foco: m.focos?.[0] ?? 'full', organizacao: m.org ?? 'individual',
     })
     setTreino(t); setPilha([]); setVerLista(false); guardar(cfg, recentes, historico)
   }
@@ -394,8 +424,8 @@ export default function TreinoPolo({ poloId, poloNome }) {
 
         </>)}
 
-        <div><Rotulo>Como os alunos fazem</Rotulo>
-          <Opcoes valor={cfg.organizacao} onChange={v => set('organizacao', v)} opcoes={[['auto', '✨ Automático'], ...Object.entries(ORGANIZACOES)]} /></div>
+        {modo === 'auto' && <div><Rotulo>Como os alunos fazem</Rotulo>
+          <Opcoes valor={cfg.organizacao} onChange={v => set('organizacao', v)} opcoes={[['auto', '✨ Automático'], ...Object.entries(ORGANIZACOES)]} /></div>}
 
         <div className="flex flex-wrap items-end gap-5">
           <div><Rotulo>Duração</Rotulo>
