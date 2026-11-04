@@ -272,7 +272,7 @@ export function gerarTreino(cfg) {
 // Texto pronto para colar no WhatsApp
 export function textoWhatsApp(t) {
   const c = t.config
-  const linhas = [`*${t.titulo}*`, `${FORMATOS[c.formato].label} · ${c.duracao} min · ${ORGANIZACOES[c.organizacao]}`, '']
+  const linhas = [`*${t.titulo}*`, `${FORMATOS[c.formato]?.label ?? ''} · ${c.duracao} min · ${ORGANIZACOES[c.organizacao] ?? ''}`, '']
   for (const b of t.blocos) {
     if (!b.itens.length) continue
     linhas.push(`*${b.titulo.toUpperCase()}* (${b.minutos} min)`)

@@ -1,0 +1,30 @@
+-- ============================================================================
+-- TREINOS DO QUADRO (28/10 e 02/11/2026) — adaptados ao polo Água Limpa
+-- Entram nos TREINOS SALVOS (aba Histórico), nas datas do quadro.
+-- Adaptação: sem halteres/kettlebell, sem bola (wallball) e sem barra fixa; a corda
+-- foi trocada por polichinelos. Em cada exercício, "Original: ..." mostra o que estava no quadro.
+-- RODE ANTES: supabase/treino/1-criar-treinos-salvos.sql
+-- Como usar: copie TUDO, cole no SQL Editor do Supabase e clique em Run.
+-- Resultado esperado: "Success. No rows returned". Seguro de rodar mais de uma vez (não duplica).
+-- Se não achar exatamente 1 polo "Água Limpa", para com uma mensagem e NÃO grava nada.
+-- ============================================================================
+
+DO $$
+DECLARE
+  v_polo uuid;
+  v_n integer;
+BEGIN
+  SELECT count(*) INTO v_n FROM polos WHERE nome ILIKE '%gua limpa%' OR bairro ILIKE '%gua limpa%';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'Esperava achar 1 polo "Água Limpa" e achei %. Nada foi gravado. Me avise.', v_n;
+  END IF;
+  SELECT id INTO v_polo FROM polos WHERE nome ILIKE '%gua limpa%' OR bairro ILIKE '%gua limpa%';
+
+  INSERT INTO treinos_salvos (polo_id, data_aula, titulo, conteudo, observacao)
+  SELECT v_polo, DATE '2026-10-28', $t$Conditioning + For Time (quadro 28/10)$t$, $j${"titulo":"Conditioning + For Time (quadro 28/10)","config":{"formato":"fortime","foco":"full","nivel":"i","alunos":null,"organizacao":"individual","duracao":60,"recursos":["quadra","arquibancada","escada","colchonete","bastao","parede"],"semente":0,"baixoImpacto":false,"modeloId":null,"manual":true},"blocos":[{"id":"mobilidade","titulo":"Liberação miofascial, mobilidade e alongamento","minutos":12,"regra":"LM em cada região · depois mobilidade de tronco e alongamento","itens":[{"nome":"LM · Panturrilha","det":"Liberação miofascial. Sem rolo: use o bastão de PVC ou a mão fechada."},{"nome":"LM · Posterior de coxa"},{"nome":"LM · TFL (lateral do quadril)"},{"nome":"LM · Glúteo médio"},{"nome":"LM · Lombar"},{"nome":"Mobilidade de tronco"},{"nome":"Alongamento"}]},{"id":"aquecimento","titulo":"Aquecimento","minutos":6,"regra":"10-15-20 repetições (3 rounds) · 15s de L-sit depois de cada round","itens":[{"nome":"Air squats","reps":"10-15-20"},{"nome":"Sit-ups","reps":"10-15-20"},{"nome":"L-sit","reps":"15s após cada round","det":"No colchonete: mãos no chão ao lado do quadril, pernas estendidas e elevadas à frente."}]},{"id":"conditioning","titulo":"Conditioning","minutos":10,"regra":"15-12-9 repetições · cap 10 min","itens":[{"nome":"Devil press sem carga","reps":"15-12-9","det":"Original: devil press com halteres. Sem carga: burpee e, ao levantar, levar o bastão de PVC do chão até acima da cabeça."},{"nome":"Polichinelo cruzado","reps":"25 por round","det":"Original: 25 single crossover (corda). Sem corda: polichinelo cruzando os braços à frente do corpo."}]},{"id":"principal","titulo":"For Time","minutos":15,"regra":"Buy-in · 3 rounds for time · cash-out · cap 15 min","itens":[{"nome":"Buy-in: polichinelos","reps":"150","det":"Original: 150 D.U (ou 150 S.U) na corda. Sem corda: 150 polichinelos."},{"nome":"V-ups","reps":"12 (3 rounds)"},{"nome":"Burpees","reps":"18 (3 rounds)"},{"nome":"Agachamento com salto","reps":"24 (3 rounds)","det":"Original: 24 DB squats (2x22,5/15 kg). Sem halteres: agachamento com salto."},{"nome":"Cash-out: polichinelos","reps":"150","det":"Original: 150 D.U (ou 150 S.U). Sem corda: 150 polichinelos."}],"obs":"Buy-in antes do 1º round; depois 3 rounds de 12 V-ups + 18 burpees + 24 agachamentos com salto; cash-out no final."}]}$j$::jsonb, 'Do quadro do polo, adaptado sem cargas, bolas nem barra fixa'
+  WHERE NOT EXISTS (SELECT 1 FROM treinos_salvos WHERE polo_id = v_polo AND data_aula = DATE '2026-10-28' AND titulo = $t$Conditioning + For Time (quadro 28/10)$t$);
+
+  INSERT INTO treinos_salvos (polo_id, data_aula, titulo, conteudo, observacao)
+  SELECT v_polo, DATE '2026-11-02', $t$Duplas "Anna" (quadro 02/11)$t$, $j${"titulo":"Duplas \"Anna\" (quadro 02/11)","config":{"formato":"fortime","foco":"full","nivel":"i","alunos":null,"organizacao":"duplas","duracao":40,"recursos":["quadra","arquibancada","escada","colchonete","bastao","parede"],"semente":0,"baixoImpacto":false,"modeloId":null,"manual":true},"blocos":[{"id":"principal","titulo":"For Time · Duplas \"Anna\"","minutos":30,"regra":"For time em duplas · EMOM com troca (um trabalha, o outro descansa; trocam a cada minuto) · ao terminar a lista, repita de volta ao topo","itens":[{"nome":"Corrida","reps":"800m","det":"Contorne a quadra (ou o equivalente em idas e voltas)."},{"nome":"Saltos na arquibancada","reps":"90","det":"Original: 90 box jump. Sem impacto: step-ups."},{"nome":"Skier swings (balanço do esquiador)","reps":"80","det":"Original: 80 KB swing (24/16 kg). Sem carga: agacha jogando os braços para trás e estende à frente."},{"nome":"Burpees","reps":"70"},{"nome":"Thrusters com bastão","reps":"60","det":"Original: 60 wallball (9/6 kg). Sem bola: agachamento e empurra o bastão acima da cabeça ao subir."},{"nome":"Afundos com bastão overhead","reps":"50","det":"Original: 50 KB OH lunges. Bastão esticado acima da cabeça."},{"nome":"Elevação de pernas no colchonete","reps":"40","det":"Original: 40 toes to bar. Sem barra fixa: deitado, sobe as pernas esticadas até 90°."},{"nome":"Puxada de bastão do chão ao alto","reps":"30","det":"Original: 30 KB snatches. Sem carga: leva o bastão do chão até acima da cabeça em um movimento."},{"nome":"Flexões","reps":"20","det":"Original: 20 pull-ups. Sem barra fixa: flexões (ou prancha com remada alternada)."},{"nome":"Corrida","reps":"800m"}],"obs":"O quadro não indicava limite de tempo: combine um cap (ex.: 25 min). Cargas, bola e barra fixa foram trocadas por exercícios sem equipamento."}]}$j$::jsonb, 'Do quadro do polo, adaptado sem cargas, bolas nem barra fixa'
+  WHERE NOT EXISTS (SELECT 1 FROM treinos_salvos WHERE polo_id = v_polo AND data_aula = DATE '2026-11-02' AND titulo = $t$Duplas "Anna" (quadro 02/11)$t$);
+END $$;
