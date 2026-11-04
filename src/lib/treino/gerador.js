@@ -19,7 +19,7 @@ export const FORMATOS = {
 export const FOCOS = {
   pernas:    { label: 'Pernas', receita: ['pernas_bi', 'pernas_uni', 'pliometria', 'cardio', 'core', 'pernas_uni'] },
   core:      { label: 'Core', receita: ['core', 'rotacao', 'isometria', 'core', 'rotacao', 'core'] },
-  cardio:    { label: 'Cardio e agilidade', receita: ['corrida', 'pliometria', 'cardio', 'pernas_bi', 'core', 'agilidade'] },
+  cardio:    { label: 'Cardio', receita: ['corrida', 'pliometria', 'cardio', 'pernas_bi', 'core', 'agilidade'] },
   full:      { label: 'Corpo todo', receita: ['pernas_bi', 'empurrar', 'core', 'cardio', 'pliometria', 'full'] },
   superiores:{ label: 'Superiores', receita: ['empurrar', 'full', 'core', 'empurrar', 'cardio', 'core'] },
   agilidade: { label: 'Agilidade', receita: ['agilidade', 'corrida', 'pliometria', 'agilidade', 'core', 'cardio'] },
